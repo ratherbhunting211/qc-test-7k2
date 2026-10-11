@@ -999,7 +999,7 @@ const PARKS = {
                  h_evildead:"17:45", h_cyber:"17:45", h_bloodengutz:"17:45", h_invasion:"18:00", h_madlands:"18:00"},
     eventOpensDefault: "18:30",   // scare zones and anything without a listed time
     eventRides: [
-      ["h_stranger","Stranger Things 5","Soundstages",120,5,["strangerthings"],"Haunted house · Access Path A or B"],
+      ["h_stranger","Stranger Things 5","Soundstages",120,5,["strangerthings5"],"Haunted house · Access Path A or B"],
       ["h_evildead","Evil Dead Burn","Soundstages",90,5,["evildead"],"Haunted house · Access Path A or B"],
       ["h_madlands","MADLANDS: Caged Cannibals","Soundstages",75,5,["madlands","cagedcannibals"],"Haunted house · Access Path A or B"],
       ["h_ozzy","Ozzy Osbourne: Prince of Darkness","Soundstages",90,5,["ozzy","princeofdarkness"],"Haunted house · Access Path A or B"],
@@ -1013,7 +1013,9 @@ const PARKS = {
       ["z_clowntown","Downtown Clowntown","New York",0,10,["clowntown"],"Scare zone","zone"],
       ["z_carnival","Infernal Carnival of Nightmares","Front gate",0,10,["infernalcarnival"],"Scare zone","zone"],
       ["z_fortnite","Fortnitemares","Hollywood",0,10,["fortnitemares"],"Scare zone · on the lagoon","zone"],
-      ["c_deatheaters","Death Eaters Encounter","Diagon Alley",0,10,["deatheaters"],"Character encounter","zone"]
+      ["c_deatheaters","Death Eaters Encounter","Diagon Alley",0,10,["deatheaters"],"Character encounter","zone"],
+      ["s_nightmare","Nightmare Fuel: Blood Noir","Production Central",0,25,["nightmarefuel","bloodnoir"],"Show · Music Plaza Stage (set its area if it's elsewhere)","show"],
+      ["s_lagoon","Stranger Things lagoon show","?",0,15,["lagoonshow","strangerthingslagoon"],"Show · on the lagoon","show"]
     ],
     feedName: /universal studios florida/i, qtId: 65,
     lands: ["Front gate","Minion Land","Production Central","New York","San Francisco","Diagon Alley","World Expo","Springfield","DreamWorks Land","Hollywood"],
@@ -1085,7 +1087,7 @@ const PARKS = {
 for (const id in PARKS) {
   PARKS[id].rides = PARKS[id].rides.map(r => ({id:r[0],name:r[1],land:r[2],peak:r[3],dur:r[4],kw:r[5],note:r[6]||"",show:!!r[7],fixedWait:r[7]?15:null}));
   PARKS[id].eventRides = (PARKS[id].eventRides || []).map(r => ({id:r[0],name:r[1],land:r[2],peak:r[3],dur:r[4],kw:r[5],note:r[6],opens:(PARKS[id].eventOpens||{})[r[0]],
-    hhn:true, house:r[7]!=="zone", zone:r[7]==="zone", show:false, fixedWait:r[7]==="zone"?0:null}));
+    hhn:true, house:!r[7], zone:r[7]==="zone", show:r[7]==="show", fixedWait:r[7]==="zone"?0:r[7]==="show"?15:null}));
 }
 
 /* Approximate centre point of each area, for "Use my location". Picking an area by hand while
@@ -1127,7 +1129,7 @@ function save(k, v){ try { localStorage.setItem("qc."+k, JSON.stringify(v)); } c
 const S = Object.assign({
   park: "usf", loc: {}, startMode: "now", start: "09:00", end: {}, crowd: 1,
   sel: {}, must: {}, done: {}, overrides: {},
-  event: {}, custom: {}, extraLand: {}, calib: {}, seen: {}, gps: false, pace: {mode:"normal", speed:0, minutes:0}, evHours: {}, opens: {}
+  event: {}, custom: {}, extraLand: {}, calib: {}, seen: {}, gps: false, pace: {mode:"normal", speed:0, minutes:0}, evHours: {}, opens: {}, showtimes: {}
 }, load("state", {}));
 let samples = load("samples", {});          // park -> ride -> hour -> [sum,count]
 const live = {};                             // park -> {rides:{id:{wait,status}}, extras:[], at}
@@ -1139,7 +1141,7 @@ if (!S.evHours.usf){   // your Horror Nights ticket: 2 PM to 2 AM
   if (!S.end.usf_hhn || S.end.usf_hhn === "01:00") S.end.usf_hhn = "02:00";
 }
 function persist(){ save("state", {park:S.park,loc:S.loc,startMode:S.startMode,start:S.start,end:S.end,crowd:S.crowd,sel:S.sel,must:S.must,done:S.done,overrides:S.overrides,
-  event:S.event,evHours:S.evHours,opens:S.opens,custom:S.custom,pace:S.pace,mapMode:S.mapMode,extraLand:S.extraLand,calib:S.calib,seen:S.seen,gps:S.gps}); }
+  event:S.event,evHours:S.evHours,opens:S.opens,showtimes:S.showtimes,custom:S.custom,pace:S.pace,mapMode:S.mapMode,extraLand:S.extraLand,calib:S.calib,seen:S.seen,gps:S.gps}); }
 
 /* ---------- Helpers ---------- */
 const $ = id => document.getElementById(id);
@@ -1253,6 +1255,27 @@ function waitAt(r, t, now){
 /* When an event item opens: your edit, else the official time we know, else your event start. */
 const hasOpens = r => r.hhn || (r.custom && r.event) || (r.extra && eventOn());
 function opensStr(r){ return ((S.opens || {})[S.park] || {})[r.id] || r.opens || (hasOpens(r) ? (park().eventOpensDefault || hours().open) : null); }
+/* Show times: typed in by you ("7:00p, 8:30p, 10p"). Without times, a show is treated as walk-up. */
+function showTimes(r){
+  if (!r.show) return [];
+  const list = ((S.showtimes || {})[S.park] || {})[r.id] || r.times || [];
+  return list.map(x => T(toMin(x))).sort((a, b) => a - b);
+}
+function parseTimes(str){
+  const out = [];
+  for (const tok of String(str).split(/[,;\n]+/)){
+    const m = tok.trim().toLowerCase().match(/^(\d{1,2})(?::(\d{2}))?\s*([ap])?\.?m?\.?$/);
+    if (!m) continue;
+    let h = +m[1], mi = +(m[2] || 0);
+    if (h > 23 || mi > 59) continue;
+    if (m[3] === "p" && h < 12) h += 12;
+    else if (m[3] === "a" && h === 12) h = 0;
+    else if (!m[3] && h >= 4 && h < 12) h += 12;      // event nights: "8:30" means 8:30 PM, "1" means 1 AM
+    out.push(String(h).padStart(2, "0") + ":" + String(mi).padStart(2, "0"));
+  }
+  return [...new Set(out)].sort((a, b) => T(toMin(a)) - T(toMin(b)));
+}
+const fmtTimes = list => list.map(x => fmtShort(T(toMin(x)))).join(", ");
 function opensAt(r){ const o = hasOpens(r) && opensStr(r); return o ? T(toMin(o)) : null; }
 function unavailable(r){
   const c = currentWait(r);
@@ -1351,6 +1374,14 @@ function simulate(order, t0, loc0, now, deadline){
   let t = t0, loc = loc0; const steps = [];
   for (const r of order){
     const wk = walk(loc, r); t += wk;
+    const times = showTimes(r);
+    if (times.length){   // be there 15 minutes before the next showtime you can make
+      const st = times.find(x => x - 15 >= t);
+      if (st == null){ steps.push({r, walk:wk, arrive:t, hold:0, wait:0, end:t, fits:false, noShow:true}); t -= wk; continue; }
+      const arrive = t, hold = st - 15 - t; t = st + r.dur;
+      steps.push({r, walk:wk, arrive, hold, showAt:st, wait:15, end:t, fits: t <= deadline});
+      loc = r; continue;
+    }
     const arrive = t, op = opensAt(r), hold = op != null && t < op ? op - t : 0; t += hold;
     const w = waitAt(r, t, now); t += w + r.dur;
     steps.push({r, walk:wk, arrive, hold, opens:op, wait:w, end:t, fits: t <= deadline});
@@ -1370,11 +1401,16 @@ function optimize(rides, t0, loc0, now, deadline, must){
   const greedy = (rand) => {
     const left = rides.slice(), out = []; let t = t0, loc = loc0;
     while (left.length){
-      const c = left.map(r => { const wk = walk(loc, r), op = opensAt(r), at = Math.max(t + wk, op || 0); return {r, cost: (at - t) + waitAt(r, at, now) + r.dur - (must[r.id] ? 5 : 0)}; })
+      const c = left.map(r => {
+        const wk = walk(loc, r), times = showTimes(r);
+        if (times.length){ const st = times.find(x => x - 15 >= t + wk); return {r, cost: st == null ? 1e6 : (st - t) + r.dur - (must[r.id] ? 5 : 0)}; }
+        const op = opensAt(r), at = Math.max(t + wk, op || 0); return {r, cost: (at - t) + waitAt(r, at, now) + r.dur - (must[r.id] ? 5 : 0)}; })
                     .sort((a,b) => a.cost-b.cost);
       const pick = c[rand ? Math.floor(Math.random()*Math.min(3,c.length)) : 0];
       out.push(pick.r); left.splice(left.indexOf(pick.r),1);
-      const wk = walk(loc, pick.r), op = opensAt(pick.r), at = Math.max(t + wk, op || 0); t = at + waitAt(pick.r, at, now) + pick.r.dur; loc = pick.r;
+      const wk = walk(loc, pick.r), times = showTimes(pick.r);
+      if (times.length){ const st = times.find(x => x - 15 >= t + wk); if (st != null){ t = st + pick.r.dur; loc = pick.r; } continue; }
+      const op = opensAt(pick.r), at = Math.max(t + wk, op || 0); t = at + waitAt(pick.r, at, now) + pick.r.dur; loc = pick.r;
     }
     return out;
   };
@@ -1538,7 +1574,8 @@ function renderRides(){
   $("rideList").innerHTML = order.map(l => '<div class="land"><div class="lh">'+esc(l)+'</div>' + groups[l].map(r => {
     const on = sel.includes(r.id), isDone = !!done[r.id];
     const sub = isDone ? "Done today" : (r.note || (r.show ? "" : r.dur+" min ride"));
-    const opensIn = eventOn() && hasOpens(r) ? '<label class="opens">Opens <input type="time" data-opens="'+r.id+'" value="'+esc(opensStr(r))+'" aria-label="Opening time for '+esc(r.name)+'"></label>' : '';
+    const timesIn = eventOn() && r.show && hasOpens(r) ? '<label class="opens">Show times <input type="text" data-times="'+r.id+'" value="'+esc(fmtTimes(((S.showtimes||{})[S.park]||{})[r.id] || r.times || []))+'" placeholder="e.g. 7p, 8:30p, 10p" aria-label="Show times for '+esc(r.name)+'" style="min-width:150px"></label>' : '';
+    const opensIn = timesIn || eventOn() && hasOpens(r) ? timesIn || '<label class="opens">Opens <input type="time" data-opens="'+r.id+'" value="'+esc(opensStr(r))+'" aria-label="Opening time for '+esc(r.name)+'"></label>' : '';
     const areaSel = (r.custom || r.extra || r.hhn) ? '<select class="area" data-area="'+r.id+'" aria-label="Area for '+esc(r.name)+'">'+["?"].concat(allLands()).map(l => '<option value="'+esc(l)+'"'+(l===r.land?' selected':'')+'>'+(l==="?"?"Set its area…":esc(l))+'</option>').join("")+'</select>' : '';
     const rm = r.custom ? '<button type="button" class="chipbtn rm" data-remove="'+r.id+'">Remove</button>' : '';
     return '<div class="ride'+(isDone?" off":"")+'">'+
@@ -1575,7 +1612,9 @@ function renderRoute(){
       '<h3>'+esc(s.r.name)+'</h3>'+
       '<div class="meta"><span>'+esc(s.r.land==="?"?"Location unknown":s.r.land)+'</span>'+(must[s.r.id]?'<span class="pill must">Must-do</span>':'')+src+'</div>'+
       '<div class="meta"><span>Walk <b>'+s.walk+'</b> min'+(i===0 && !isLate && P.fromHere ? ' from you' : '')+'</span><span>'+(s.r.zone?'No line':s.r.show?'Arrive early <b>15</b> min':'Wait <b>~'+round5(s.wait)+'</b> min')+'</span><span>'+(s.r.zone?'Walk-through':s.r.show?'Show':(s.r.house||(s.r.extra&&eventOn()))?'Inside':'Ride')+' <b>'+s.r.dur+'</b> min</span><span>Out by <b>'+fmtShort(s.end)+'</b></span></div>'+
-      (s.hold > 0 ? '<div class="meta"><span class="pill must">Opens '+fmtShort(s.opens)+'</span><span>You\'ll be there <b>'+Math.round(s.hold)+'</b> min before it opens</span></div>' : '')+
+      (s.showAt ? '<div class="meta"><span class="pill must">Show '+fmtShort(s.showAt)+'</span><span>Be there by <b>'+fmtShort(s.showAt-15)+'</b> for a good spot</span></div>' : '')+
+      (s.noShow ? '<div class="meta"><span>No showtimes left that you can reach tonight</span></div>' : '')+
+      (s.hold > 0 && !s.showAt ? '<div class="meta"><span class="pill must">Opens '+fmtShort(s.opens)+'</span><span>You\'ll be there <b>'+Math.round(s.hold)+'</b> min before it opens</span></div>' : '')+
       (s.r.note && !s.r.show && !s.r.custom && !s.r.extra ? '<div class="hint">'+esc(s.r.note)+'</div>' : '')+
       (isLate ? '' : '<div class="actions"><button type="button" class="done" data-done="'+s.r.id+'">Done ✓</button><button type="button" data-skip="'+s.r.id+'">Skip</button></div>')+
       '</div></li>';
@@ -1847,6 +1886,8 @@ $("selAll").onclick = () => { S.sel[K()] = allRides().map(r=>r.id); persist(); r
 $("selNone").onclick = () => { S.sel[K()] = []; persist(); renderRides(); };
 $("resetDay").onclick = () => { S.done[K()] = {}; persist(); renderRides(); };
 $("rideList").addEventListener("change", e => {
+  const tid = e.target.dataset.times;
+  if (tid){ const list = parseTimes(e.target.value); ((S.showtimes = S.showtimes || {})[S.park] = S.showtimes[S.park] || {})[tid] = list; e.target.value = fmtTimes(list); persist(); return; }
   const oid = e.target.dataset.opens;
   if (oid){ if (e.target.value){ ((S.opens = S.opens || {})[S.park] = S.opens[S.park] || {})[oid] = e.target.value; persist(); } return; }
   const aid = e.target.dataset.area;
