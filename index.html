@@ -1,0 +1,1910 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<meta name="googlebot" content="noindex, nofollow">
+<meta name="theme-color" content="#0B4566">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Queue Compass">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}</style>
+</head><body>
+<title>Queue Compass</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&display=swap">
+<style>
+/* Layout: one-column phone app. Gradient header band, numbered planning steps, color-coded queue signs,
+   timeline route. Day palette: lagoon teal + marquee gold. Horror Nights: midnight purple + pumpkin. */
+:root{
+  --bg:#EFF4F3; --surface:#FFFFFF; --surface-2:#F6F9F8; --ink:#0F2229; --muted:#5C6F76; --line:#DCE5E4;
+  --accent:#0A6E7C; --accent-2:#0B4566; --accent-ink:#FFFFFF; --ticket:#FFC233; --ticket-ink:#2A1E00;
+  --good:#1D8A4E; --warn:#C27200; --bad:#C8392D; --soft:#E4EEED; --water:#CDE5EA; --me:#2A6FDB;
+  --hdr1:#0B4566; --hdr2:#0A7C83; --g1:#0B4566; --g2:#0A6E7C; --glow:rgba(10,110,124,.16);
+  --shadow:0 1px 2px rgba(15,34,41,.06), 0 6px 18px rgba(15,34,41,.07);
+  --display:"Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --body:"Atkinson Hyperlegible", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --r:18px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0A161B; --surface:#112229; --surface-2:#0E1D23; --ink:#E7F1F0; --muted:#93A7AC; --line:#213740;
+  --accent:#45BDCB; --accent-2:#1D6E88; --accent-ink:#04191E; --ticket:#FFCB4D; --ticket-ink:#221800;
+  --good:#4FC67F; --warn:#F0A63D; --bad:#F26B5F; --soft:#17303A; --water:#163B45; --me:#6EA4FF;
+  --hdr1:#082F45; --hdr2:#0B5C66; --g1:#0B4A63; --g2:#0E7A86; --glow:rgba(69,189,203,.18); --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 22px rgba(0,0,0,.28); color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#0A161B; --surface:#112229; --surface-2:#0E1D23; --ink:#E7F1F0; --muted:#93A7AC; --line:#213740;
+  --accent:#45BDCB; --accent-2:#1D6E88; --accent-ink:#04191E; --ticket:#FFCB4D; --ticket-ink:#221800;
+  --good:#4FC67F; --warn:#F0A63D; --bad:#F26B5F; --soft:#17303A; --water:#163B45; --me:#6EA4FF;
+  --hdr1:#082F45; --hdr2:#0B5C66; --g1:#0B4A63; --g2:#0E7A86; --glow:rgba(69,189,203,.18); --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 22px rgba(0,0,0,.28); color-scheme:dark }
+/* Horror Nights always runs on its night palette, whatever the phone's theme */
+:root.hhn{
+  --bg:#0D0A12; --surface:#18121F; --surface-2:#130E19; --ink:#F3EAF6; --muted:#A898B2; --line:#2D2338;
+  --accent:#FF7A1A; --accent-2:#6B2FD6; --accent-ink:#1B0900; --ticket:#9BE15D; --ticket-ink:#0F1A05;
+  --good:#9BE15D; --warn:#FFB020; --bad:#FF5A5A; --soft:#231A2E; --water:#1D1730; --me:#7FB0FF;
+  --hdr1:#2A0F4A; --hdr2:#7A2E12; --g1:#6B2FD6; --g2:#E8650F; --glow:rgba(255,122,26,.22); --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 26px rgba(0,0,0,.4); color-scheme:dark }
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.45;-webkit-text-size-adjust:100%}
+:root.hhn body{background:radial-gradient(120% 60% at 50% -10%, rgba(107,47,214,.28), transparent 60%), var(--bg)}
+*{box-sizing:border-box}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;-webkit-tap-highlight-color:transparent}
+:focus-visible{outline:3px solid var(--ticket);outline-offset:2px}
+.app{max-width:560px;margin:0 auto;padding-inline:16px;padding-block:0 112px}
+
+/* Header band */
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:6;margin-inline:-16px;padding:12px 16px;display:flex;align-items:center;gap:12px;color:#fff;
+  background:linear-gradient(120deg,var(--hdr1),var(--hdr2));box-shadow:0 6px 20px rgba(0,0,0,.18)}
+.brand{font-family:var(--display);font-weight:800;font-size:1.28rem;letter-spacing:-.015em;display:flex;align-items:center;gap:9px}
+.brand svg{flex:none;filter:drop-shadow(0 2px 4px rgba(0,0,0,.25))}
+.status{margin-left:auto;font-size:.76rem;font-weight:700;display:flex;align-items:center;gap:7px;min-width:0;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);padding:5px 10px;border-radius:999px}
+.dot{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.6);flex:none}
+.dot.live{background:#5BE38F;box-shadow:0 0 0 3px rgba(91,227,143,.3)}
+@media (prefers-reduced-motion:no-preference){.dot.live{animation:pulse 2.4s ease-in-out infinite}}
+@keyframes pulse{50%{box-shadow:0 0 0 6px rgba(91,227,143,0)}}
+.hero{margin-inline:-16px;padding:18px 16px 22px;background:linear-gradient(180deg,color-mix(in srgb,var(--hdr2) 16%,var(--bg)),var(--bg))}
+.hero h1{font-family:var(--display);font-weight:800;font-size:1.7rem;line-height:1.08;letter-spacing:-.02em;margin:0;text-wrap:balance}
+.hero p{margin:6px 0 0;color:var(--muted);font-size:.92rem}
+.hero .ev{display:inline-flex;align-items:center;gap:6px;margin-bottom:8px;font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
+
+/* Steps */
+section.block{display:grid;gap:12px;padding-block:20px 6px}
+h2.sec{display:flex;align-items:center;gap:10px;margin:0;font-family:var(--display);font-weight:800;font-size:1.12rem;letter-spacing:-.01em;flex:1}
+h2.sec .num{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:.8rem;background:var(--accent);color:var(--accent-ink);flex:none}
+.sechead{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.label{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);font-weight:700}
+.hint{font-size:.84rem;color:var(--muted)}
+
+/* Park cards */
+.parks{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.parks button{position:relative;overflow:hidden;border:1px solid var(--line);background:var(--surface);border-radius:16px;padding:12px 10px 11px;text-align:left;display:grid;gap:2px;box-shadow:var(--shadow);min-height:86px;align-content:end}
+.parks button[data-park="usf"]{--p1:#0B4566;--p2:#13A0A8}
+.parks button[data-park="ioa"]{--p1:#0E5A3A;--p2:#4FAF5A}
+.parks button[data-park="epic"]{--p1:#2B1C6E;--p2:#C04FD6}
+.parks button::before{content:"";position:absolute;inset:0 0 auto 0;height:5px;background:linear-gradient(90deg,var(--p1),var(--p2))}
+.parks button svg{position:absolute;top:10px;right:8px;opacity:.5}
+.parks .pk{font-family:var(--display);font-weight:800;font-size:1.02rem;line-height:1.1}
+.parks .ps{font-size:.7rem;color:var(--muted);line-height:1.2}
+.parks button[aria-pressed="true"]{color:#fff;border-color:transparent;background:linear-gradient(150deg,var(--p1),var(--p2))}
+.parks button[aria-pressed="true"] .ps{color:rgba(255,255,255,.82)}
+.parks button[aria-pressed="true"] svg{opacity:.9}
+
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;background:var(--soft);border-radius:14px;padding:4px;gap:4px}
+.seg button{border:0;background:transparent;border-radius:10px;padding:10px 6px;font-weight:700;font-size:.88rem;line-height:1.2;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 4px rgba(0,0,0,.14)}
+select,input[type=time],input[type=number],input[type=text]{width:100%;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 12px;min-height:48px;box-shadow:inset 0 1px 0 rgba(0,0,0,.02)}
+.row2{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.field{display:grid;gap:5px;min-width:0}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px;display:grid;gap:12px;box-shadow:var(--shadow)}
+.banner{background:var(--soft);border-radius:var(--r);padding:12px 14px;font-size:.88rem;display:grid;gap:6px}
+.banner b{font-family:var(--display)}
+.tools{display:flex;gap:8px;flex-wrap:wrap}
+.chipbtn{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:7px 13px;font-size:.84rem;font-weight:700}
+.chipbtn[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.gpsbtn{display:inline-flex;align-items:center;gap:6px}
+
+/* Event toggle */
+.toggle{display:grid;grid-template-columns:auto 1fr auto;gap:2px 12px;align-items:center;text-align:left;width:100%;border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;background:var(--surface);box-shadow:var(--shadow)}
+.toggle .tico{grid-row:1/3;width:40px;height:40px;border-radius:12px;display:grid;place-items:center;background:linear-gradient(150deg,#3A1468,#C2470F)}
+.toggle .tname{font-family:var(--display);font-weight:800}
+.toggle .tsub{grid-column:2;font-size:.8rem;color:var(--muted)}
+.toggle .sw{grid-column:3;grid-row:1/3;width:48px;height:30px;border-radius:999px;background:var(--line);position:relative;transition:background .2s}
+.toggle .sw::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:left .2s}
+.toggle[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 4px var(--glow)}
+.toggle[aria-pressed="true"] .sw{background:var(--accent)}
+.toggle[aria-pressed="true"] .sw::after{left:21px}
+
+/* Ride list */
+.land{display:grid;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow)}
+.land>.lh{padding:10px 14px 8px;font-family:var(--display);font-size:.92rem;font-weight:800;color:var(--ink);display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line);background:var(--surface-2)}
+.land>.lh::before{content:"";width:8px;height:8px;border-radius:3px;background:var(--accent);transform:rotate(45deg)}
+.ride{display:grid;grid-template-columns:auto 1fr auto auto;align-items:center;gap:10px;padding:11px 12px 11px 14px;border-top:1px solid var(--line)}
+.land>.lh+.ride{border-top:0}
+.ride input[type=checkbox]{width:22px;height:22px;accent-color:var(--accent);margin:0}
+.rname{min-width:0;display:grid;gap:1px}
+.rname label{cursor:pointer}
+.rname span{font-weight:700;line-height:1.25;display:block}
+.rname small{color:var(--muted);font-size:.78rem}
+.rname .area{min-height:34px;padding:4px 8px;font-size:.82rem;margin-top:5px;max-width:230px;border-radius:9px}
+.rname .rm{margin-top:5px;justify-self:start;padding:3px 10px;font-size:.78rem}
+.ride.off .rname span{color:var(--muted);text-decoration:line-through}
+.star{border:0;background:none;font-size:1.3rem;line-height:1;padding:6px;color:var(--line);transition:transform .15s}
+.star[aria-pressed="true"]{color:var(--ticket);text-shadow:0 0 12px var(--glow)}
+.wait{--lv:var(--muted);min-width:58px;border:0;border-radius:12px;padding:5px 7px 4px;text-align:center;font-family:var(--display);font-weight:800;font-variant-numeric:tabular-nums;line-height:1.02;
+  background:color-mix(in srgb,var(--lv) 14%,var(--surface));box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--lv) 55%,transparent)}
+.wait b{display:block;font-size:1.18rem;color:var(--ink)}
+.wait i{display:block;font-style:normal;font-family:var(--body);font-size:.6rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--lv)}
+.wait.lo{--lv:var(--good)} .wait.mid{--lv:var(--warn)} .wait.hi{--lv:var(--bad)}
+.wait.live i::before{content:"● "}
+.wait.down{--lv:var(--bad)}
+.editwait{grid-column:1/-1;display:flex;gap:8px;align-items:center;padding-left:32px}
+.editwait input{max-width:110px}
+.addbox{background:var(--surface);border:1px dashed var(--line);border-radius:var(--r);padding:12px 14px}
+.addbox summary{font-weight:700;cursor:pointer;color:var(--accent)}
+.addform{display:grid;gap:10px;padding-top:12px}
+.foot{font-size:.75rem;color:var(--muted);padding-block:28px 8px;display:grid;gap:8px}
+
+/* Bottom bar + CTA */
+.cta{position:fixed;left:0;right:0;bottom:calc(66px + env(safe-area-inset-bottom,0px));display:flex;justify-content:center;padding-inline:16px;pointer-events:none;z-index:4}
+.cta button{pointer-events:auto;width:100%;max-width:528px;border:0;border-radius:16px;color:#fff;font-family:var(--display);font-weight:800;font-size:1.1rem;padding:16px;
+  background:linear-gradient(120deg,var(--g1),var(--g2));box-shadow:0 10px 26px var(--glow),0 4px 10px rgba(0,0,0,.18);display:flex;align-items:center;justify-content:center;gap:10px}
+:root.hhn .cta button{color:#fff}
+nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:5;background:color-mix(in srgb,var(--surface) 88%,transparent);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-top:1px solid var(--line);display:flex;justify-content:center;padding-bottom:env(safe-area-inset-bottom,0px)}
+nav.tabs div{display:grid;grid-template-columns:1fr 1fr;width:100%;max-width:560px}
+nav.tabs button{border:0;background:none;padding:10px 0 12px;font-weight:700;font-size:.8rem;color:var(--muted);display:grid;justify-items:center;gap:3px}
+nav.tabs button[aria-pressed="true"]{color:var(--accent)}
+
+/* Route */
+.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding-block:16px 4px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:11px 10px;display:grid;gap:2px;min-width:0;box-shadow:var(--shadow)}
+.stat b{font-family:var(--display);font-weight:800;font-size:1.25rem;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.stat span{font-size:.66rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-weight:700}
+.stat:first-child{background:linear-gradient(150deg,var(--g1),var(--g2));border-color:transparent;color:#fff}
+.stat:first-child span{color:rgba(255,255,255,.8)}
+.verdict{border-radius:var(--r);padding:12px 14px;font-weight:700;display:flex;gap:10px;align-items:flex-start}
+.verdict.ok{background:color-mix(in srgb,var(--good) 15%,var(--surface))}
+.verdict.no{background:color-mix(in srgb,var(--warn) 18%,var(--surface))}
+.verdict.upd{background:color-mix(in srgb,var(--accent) 15%,var(--surface));display:grid;gap:4px;font-weight:400;margin-top:16px;box-shadow:inset 3px 0 0 var(--accent)}
+.verdict.upd b{font-family:var(--display)}
+.mapcard{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow)}
+.mapcard>svg{display:block;width:100%;height:auto}
+#lmap img{max-width:none!important;max-height:none!important}
+.maplink{font-size:.86rem;font-weight:700;color:var(--accent)}
+.steps{list-style:none;margin:0;padding:0;display:grid}
+.step{display:grid;grid-template-columns:58px 1fr;gap:12px;position:relative;padding-bottom:14px}
+.step::before{content:"";position:absolute;left:28px;top:34px;bottom:-2px;width:2px;background:linear-gradient(var(--accent),color-mix(in srgb,var(--accent) 25%,transparent))}
+.step:last-child::before{display:none}
+.when{position:relative;z-index:1;align-self:start;margin-top:8px;padding:6px 0 5px;border-radius:12px;text-align:center;background:var(--surface);border:1px solid var(--line);font-family:var(--display);font-weight:800;font-variant-numeric:tabular-nums;font-size:.95rem;line-height:1.05}
+.when small{display:block;font-family:var(--body);font-size:.62rem;color:var(--muted);font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.step.next .when{background:var(--ticket);color:var(--ticket-ink);border-color:transparent}
+.step.next .when small{color:var(--ticket-ink)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:13px 14px;display:grid;gap:8px;min-width:0;box-shadow:var(--shadow)}
+.step.next .card{border:2px solid var(--accent);box-shadow:0 0 0 5px var(--glow),var(--shadow)}
+.step.next .card::before{content:"Up next";font-size:.66rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.card h3{margin:0;font-family:var(--display);font-weight:800;font-size:1.06rem;line-height:1.22;letter-spacing:-.005em}
+.meta{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:.82rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.meta b{color:var(--ink)}
+.pill{display:inline-block;font-size:.66rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;border-radius:999px;padding:2px 8px;background:var(--soft);color:var(--muted)}
+.pill.live{background:color-mix(in srgb,var(--good) 18%,var(--surface));color:var(--good)}
+.pill.must{background:var(--ticket);color:var(--ticket-ink)}
+.actions{display:flex;gap:8px}
+.actions button{flex:1;border-radius:12px;padding:10px;font-weight:700;border:1px solid var(--line);background:var(--surface-2)}
+.actions .done{background:linear-gradient(120deg,var(--g1),var(--g2));color:#fff;border-color:transparent}
+.late .card{opacity:.72;border-style:dashed;box-shadow:none}
+.empty{padding:40px 12px;text-align:center;color:var(--muted);display:grid;gap:10px;justify-items:center}
+.empty svg{opacity:.6}
+@media (max-width:380px){.summary{grid-template-columns:repeat(2,1fr)}.parks .ps{display:none}}
+@media (prefers-reduced-motion:no-preference){.cta button{transition:transform .15s}.cta button:active{transform:scale(.98)}.star:active{transform:scale(1.25)}}
+.maphead{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.seg.mini{padding:3px;border-radius:10px}
+.seg.mini button{padding:6px 10px;font-size:.78rem}
+#lmap{height:400px;background:var(--soft)}
+.qc-pin{background:none;border:0}
+.qc-pin>div{transform:translate(-50%,-50%);display:grid;justify-items:center;gap:2px;white-space:nowrap;pointer-events:auto}
+.qc-pin b{font-family:var(--display);font-weight:800;font-size:13px;line-height:1;padding:5px 9px;border-radius:999px;background:var(--accent);color:var(--accent-ink);border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35)}
+.qc-pin b.first{background:var(--ticket);color:var(--ticket-ink)}
+.qc-pin i{width:10px;height:10px;border-radius:50%;background:#fff;border:3px solid var(--accent);box-shadow:0 1px 3px rgba(0,0,0,.35)}
+.qc-pin span{font:700 11px/1.1 var(--body);color:#13282B;background:rgba(255,255,255,.9);padding:2px 5px;border-radius:5px}
+.qc-pin.drag i{width:16px;height:16px;border-color:var(--ticket)}
+.feed{display:grid;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:10px}
+.feedrow{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:8px 12px;border-top:1px solid var(--line);font-size:.85rem}
+.feedrow:first-child{border-top:0}
+.feedrow b{min-width:0;overflow-wrap:anywhere}
+.feedrow small{grid-column:1/-1;color:var(--muted)}
+.feedrow em{font-style:normal;font-variant-numeric:tabular-nums;font-weight:700}
+</style>
+<style>/* Leaflet 1.9.4 (BSD-2-Clause) */
+/* required styles */
+
+.leaflet-pane,
+.leaflet-tile,
+.leaflet-marker-icon,
+.leaflet-marker-shadow,
+.leaflet-tile-container,
+.leaflet-pane > svg,
+.leaflet-pane > canvas,
+.leaflet-zoom-box,
+.leaflet-image-layer,
+.leaflet-layer {
+	position: absolute;
+	left: 0;
+	top: 0;
+	}
+.leaflet-container {
+	overflow: hidden;
+	}
+.leaflet-tile,
+.leaflet-marker-icon,
+.leaflet-marker-shadow {
+	-webkit-user-select: none;
+	   -moz-user-select: none;
+	        user-select: none;
+	  -webkit-user-drag: none;
+	}
+/* Prevents IE11 from highlighting tiles in blue */
+.leaflet-tile::selection {
+	background: transparent;
+}
+/* Safari renders non-retina tile on retina better with this, but Chrome is worse */
+.leaflet-safari .leaflet-tile {
+	image-rendering: -webkit-optimize-contrast;
+	}
+/* hack that prevents hw layers "stretching" when loading new tiles */
+.leaflet-safari .leaflet-tile-container {
+	width: 1600px;
+	height: 1600px;
+	-webkit-transform-origin: 0 0;
+	}
+.leaflet-marker-icon,
+.leaflet-marker-shadow {
+	display: block;
+	}
+/* .leaflet-container svg: reset svg max-width decleration shipped in Joomla! (joomla.org) 3.x */
+/* .leaflet-container img: map is broken in FF if you have max-width: 100% on tiles */
+.leaflet-container .leaflet-overlay-pane svg {
+	max-width: none !important;
+	max-height: none !important;
+	}
+.leaflet-container .leaflet-marker-pane img,
+.leaflet-container .leaflet-shadow-pane img,
+.leaflet-container .leaflet-tile-pane img,
+.leaflet-container img.leaflet-image-layer,
+.leaflet-container .leaflet-tile {
+	max-width: none !important;
+	max-height: none !important;
+	width: auto;
+	padding: 0;
+	}
+
+.leaflet-container img.leaflet-tile {
+	/* See: https://bugs.chromium.org/p/chromium/issues/detail?id=600120 */
+	mix-blend-mode: plus-lighter;
+}
+
+.leaflet-container.leaflet-touch-zoom {
+	-ms-touch-action: pan-x pan-y;
+	touch-action: pan-x pan-y;
+	}
+.leaflet-container.leaflet-touch-drag {
+	-ms-touch-action: pinch-zoom;
+	/* Fallback for FF which doesn't support pinch-zoom */
+	touch-action: none;
+	touch-action: pinch-zoom;
+}
+.leaflet-container.leaflet-touch-drag.leaflet-touch-zoom {
+	-ms-touch-action: none;
+	touch-action: none;
+}
+.leaflet-container {
+	-webkit-tap-highlight-color: transparent;
+}
+.leaflet-container a {
+	-webkit-tap-highlight-color: rgba(51, 181, 229, 0.4);
+}
+.leaflet-tile {
+	filter: inherit;
+	visibility: hidden;
+	}
+.leaflet-tile-loaded {
+	visibility: inherit;
+	}
+.leaflet-zoom-box {
+	width: 0;
+	height: 0;
+	-moz-box-sizing: border-box;
+	     box-sizing: border-box;
+	z-index: 800;
+	}
+/* workaround for https://bugzilla.mozilla.org/show_bug.cgi?id=888319 */
+.leaflet-overlay-pane svg {
+	-moz-user-select: none;
+	}
+
+.leaflet-pane         { z-index: 400; }
+
+.leaflet-tile-pane    { z-index: 200; }
+.leaflet-overlay-pane { z-index: 400; }
+.leaflet-shadow-pane  { z-index: 500; }
+.leaflet-marker-pane  { z-index: 600; }
+.leaflet-tooltip-pane   { z-index: 650; }
+.leaflet-popup-pane   { z-index: 700; }
+
+.leaflet-map-pane canvas { z-index: 100; }
+.leaflet-map-pane svg    { z-index: 200; }
+
+.leaflet-vml-shape {
+	width: 1px;
+	height: 1px;
+	}
+.lvml {
+	behavior: url(#default#VML);
+	display: inline-block;
+	position: absolute;
+	}
+
+
+/* control positioning */
+
+.leaflet-control {
+	position: relative;
+	z-index: 800;
+	pointer-events: visiblePainted; /* IE 9-10 doesn't have auto */
+	pointer-events: auto;
+	}
+.leaflet-top,
+.leaflet-bottom {
+	position: absolute;
+	z-index: 1000;
+	pointer-events: none;
+	}
+.leaflet-top {
+	top: 0;
+	}
+.leaflet-right {
+	right: 0;
+	}
+.leaflet-bottom {
+	bottom: 0;
+	}
+.leaflet-left {
+	left: 0;
+	}
+.leaflet-control {
+	float: left;
+	clear: both;
+	}
+.leaflet-right .leaflet-control {
+	float: right;
+	}
+.leaflet-top .leaflet-control {
+	margin-top: 10px;
+	}
+.leaflet-bottom .leaflet-control {
+	margin-bottom: 10px;
+	}
+.leaflet-left .leaflet-control {
+	margin-left: 10px;
+	}
+.leaflet-right .leaflet-control {
+	margin-right: 10px;
+	}
+
+
+/* zoom and fade animations */
+
+.leaflet-fade-anim .leaflet-popup {
+	opacity: 0;
+	-webkit-transition: opacity 0.2s linear;
+	   -moz-transition: opacity 0.2s linear;
+	        transition: opacity 0.2s linear;
+	}
+.leaflet-fade-anim .leaflet-map-pane .leaflet-popup {
+	opacity: 1;
+	}
+.leaflet-zoom-animated {
+	-webkit-transform-origin: 0 0;
+	    -ms-transform-origin: 0 0;
+	        transform-origin: 0 0;
+	}
+svg.leaflet-zoom-animated {
+	will-change: transform;
+}
+
+.leaflet-zoom-anim .leaflet-zoom-animated {
+	-webkit-transition: -webkit-transform 0.25s cubic-bezier(0,0,0.25,1);
+	   -moz-transition:    -moz-transform 0.25s cubic-bezier(0,0,0.25,1);
+	        transition:         transform 0.25s cubic-bezier(0,0,0.25,1);
+	}
+.leaflet-zoom-anim .leaflet-tile,
+.leaflet-pan-anim .leaflet-tile {
+	-webkit-transition: none;
+	   -moz-transition: none;
+	        transition: none;
+	}
+
+.leaflet-zoom-anim .leaflet-zoom-hide {
+	visibility: hidden;
+	}
+
+
+/* cursors */
+
+.leaflet-interactive {
+	cursor: pointer;
+	}
+.leaflet-grab {
+	cursor: -webkit-grab;
+	cursor:    -moz-grab;
+	cursor:         grab;
+	}
+.leaflet-crosshair,
+.leaflet-crosshair .leaflet-interactive {
+	cursor: crosshair;
+	}
+.leaflet-popup-pane,
+.leaflet-control {
+	cursor: auto;
+	}
+.leaflet-dragging .leaflet-grab,
+.leaflet-dragging .leaflet-grab .leaflet-interactive,
+.leaflet-dragging .leaflet-marker-draggable {
+	cursor: move;
+	cursor: -webkit-grabbing;
+	cursor:    -moz-grabbing;
+	cursor:         grabbing;
+	}
+
+/* marker & overlays interactivity */
+.leaflet-marker-icon,
+.leaflet-marker-shadow,
+.leaflet-image-layer,
+.leaflet-pane > svg path,
+.leaflet-tile-container {
+	pointer-events: none;
+	}
+
+.leaflet-marker-icon.leaflet-interactive,
+.leaflet-image-layer.leaflet-interactive,
+.leaflet-pane > svg path.leaflet-interactive,
+svg.leaflet-image-layer.leaflet-interactive path {
+	pointer-events: visiblePainted; /* IE 9-10 doesn't have auto */
+	pointer-events: auto;
+	}
+
+/* visual tweaks */
+
+.leaflet-container {
+	background: #ddd;
+	outline-offset: 1px;
+	}
+.leaflet-container a {
+	color: #0078A8;
+	}
+.leaflet-zoom-box {
+	border: 2px dotted #38f;
+	background: rgba(255,255,255,0.5);
+	}
+
+
+/* general typography */
+.leaflet-container {
+	font-family: "Helvetica Neue", Arial, Helvetica, sans-serif;
+	font-size: 12px;
+	font-size: 0.75rem;
+	line-height: 1.5;
+	}
+
+
+/* general toolbar styles */
+
+.leaflet-bar {
+	box-shadow: 0 1px 5px rgba(0,0,0,0.65);
+	border-radius: 4px;
+	}
+.leaflet-bar a {
+	background-color: #fff;
+	border-bottom: 1px solid #ccc;
+	width: 26px;
+	height: 26px;
+	line-height: 26px;
+	display: block;
+	text-align: center;
+	text-decoration: none;
+	color: black;
+	}
+.leaflet-bar a,
+.leaflet-control-layers-toggle {
+	background-position: 50% 50%;
+	background-repeat: no-repeat;
+	display: block;
+	}
+.leaflet-bar a:hover,
+.leaflet-bar a:focus {
+	background-color: #f4f4f4;
+	}
+.leaflet-bar a:first-child {
+	border-top-left-radius: 4px;
+	border-top-right-radius: 4px;
+	}
+.leaflet-bar a:last-child {
+	border-bottom-left-radius: 4px;
+	border-bottom-right-radius: 4px;
+	border-bottom: none;
+	}
+.leaflet-bar a.leaflet-disabled {
+	cursor: default;
+	background-color: #f4f4f4;
+	color: #bbb;
+	}
+
+.leaflet-touch .leaflet-bar a {
+	width: 30px;
+	height: 30px;
+	line-height: 30px;
+	}
+.leaflet-touch .leaflet-bar a:first-child {
+	border-top-left-radius: 2px;
+	border-top-right-radius: 2px;
+	}
+.leaflet-touch .leaflet-bar a:last-child {
+	border-bottom-left-radius: 2px;
+	border-bottom-right-radius: 2px;
+	}
+
+/* zoom control */
+
+.leaflet-control-zoom-in,
+.leaflet-control-zoom-out {
+	font: bold 18px 'Lucida Console', Monaco, monospace;
+	text-indent: 1px;
+	}
+
+.leaflet-touch .leaflet-control-zoom-in, .leaflet-touch .leaflet-control-zoom-out  {
+	font-size: 22px;
+	}
+
+
+/* layers control */
+
+.leaflet-control-layers {
+	box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+	background: #fff;
+	border-radius: 5px;
+	}
+.leaflet-control-layers-toggle {
+	background-image: url(images/layers.png);
+	width: 36px;
+	height: 36px;
+	}
+.leaflet-retina .leaflet-control-layers-toggle {
+	background-image: url(images/layers-2x.png);
+	background-size: 26px 26px;
+	}
+.leaflet-touch .leaflet-control-layers-toggle {
+	width: 44px;
+	height: 44px;
+	}
+.leaflet-control-layers .leaflet-control-layers-list,
+.leaflet-control-layers-expanded .leaflet-control-layers-toggle {
+	display: none;
+	}
+.leaflet-control-layers-expanded .leaflet-control-layers-list {
+	display: block;
+	position: relative;
+	}
+.leaflet-control-layers-expanded {
+	padding: 6px 10px 6px 6px;
+	color: #333;
+	background: #fff;
+	}
+.leaflet-control-layers-scrollbar {
+	overflow-y: scroll;
+	overflow-x: hidden;
+	padding-right: 5px;
+	}
+.leaflet-control-layers-selector {
+	margin-top: 2px;
+	position: relative;
+	top: 1px;
+	}
+.leaflet-control-layers label {
+	display: block;
+	font-size: 13px;
+	font-size: 1.08333em;
+	}
+.leaflet-control-layers-separator {
+	height: 0;
+	border-top: 1px solid #ddd;
+	margin: 5px -10px 5px -6px;
+	}
+
+/* Default icon URLs */
+.leaflet-default-icon-path { /* used only in path-guessing heuristic, see L.Icon.Default */
+	background-image: url(images/marker-icon.png);
+	}
+
+
+/* attribution and scale controls */
+
+.leaflet-container .leaflet-control-attribution {
+	background: #fff;
+	background: rgba(255, 255, 255, 0.8);
+	margin: 0;
+	}
+.leaflet-control-attribution,
+.leaflet-control-scale-line {
+	padding: 0 5px;
+	color: #333;
+	line-height: 1.4;
+	}
+.leaflet-control-attribution a {
+	text-decoration: none;
+	}
+.leaflet-control-attribution a:hover,
+.leaflet-control-attribution a:focus {
+	text-decoration: underline;
+	}
+.leaflet-attribution-flag {
+	display: inline !important;
+	vertical-align: baseline !important;
+	width: 1em;
+	height: 0.6669em;
+	}
+.leaflet-left .leaflet-control-scale {
+	margin-left: 5px;
+	}
+.leaflet-bottom .leaflet-control-scale {
+	margin-bottom: 5px;
+	}
+.leaflet-control-scale-line {
+	border: 2px solid #777;
+	border-top: none;
+	line-height: 1.1;
+	padding: 2px 5px 1px;
+	white-space: nowrap;
+	-moz-box-sizing: border-box;
+	     box-sizing: border-box;
+	background: rgba(255, 255, 255, 0.8);
+	text-shadow: 1px 1px #fff;
+	}
+.leaflet-control-scale-line:not(:first-child) {
+	border-top: 2px solid #777;
+	border-bottom: none;
+	margin-top: -2px;
+	}
+.leaflet-control-scale-line:not(:first-child):not(:last-child) {
+	border-bottom: 2px solid #777;
+	}
+
+.leaflet-touch .leaflet-control-attribution,
+.leaflet-touch .leaflet-control-layers,
+.leaflet-touch .leaflet-bar {
+	box-shadow: none;
+	}
+.leaflet-touch .leaflet-control-layers,
+.leaflet-touch .leaflet-bar {
+	border: 2px solid rgba(0,0,0,0.2);
+	background-clip: padding-box;
+	}
+
+
+/* popup */
+
+.leaflet-popup {
+	position: absolute;
+	text-align: center;
+	margin-bottom: 20px;
+	}
+.leaflet-popup-content-wrapper {
+	padding: 1px;
+	text-align: left;
+	border-radius: 12px;
+	}
+.leaflet-popup-content {
+	margin: 13px 24px 13px 20px;
+	line-height: 1.3;
+	font-size: 13px;
+	font-size: 1.08333em;
+	min-height: 1px;
+	}
+.leaflet-popup-content p {
+	margin: 17px 0;
+	margin: 1.3em 0;
+	}
+.leaflet-popup-tip-container {
+	width: 40px;
+	height: 20px;
+	position: absolute;
+	left: 50%;
+	margin-top: -1px;
+	margin-left: -20px;
+	overflow: hidden;
+	pointer-events: none;
+	}
+.leaflet-popup-tip {
+	width: 17px;
+	height: 17px;
+	padding: 1px;
+
+	margin: -10px auto 0;
+	pointer-events: auto;
+
+	-webkit-transform: rotate(45deg);
+	   -moz-transform: rotate(45deg);
+	    -ms-transform: rotate(45deg);
+	        transform: rotate(45deg);
+	}
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+	background: white;
+	color: #333;
+	box-shadow: 0 3px 14px rgba(0,0,0,0.4);
+	}
+.leaflet-container a.leaflet-popup-close-button {
+	position: absolute;
+	top: 0;
+	right: 0;
+	border: none;
+	text-align: center;
+	width: 24px;
+	height: 24px;
+	font: 16px/24px Tahoma, Verdana, sans-serif;
+	color: #757575;
+	text-decoration: none;
+	background: transparent;
+	}
+.leaflet-container a.leaflet-popup-close-button:hover,
+.leaflet-container a.leaflet-popup-close-button:focus {
+	color: #585858;
+	}
+.leaflet-popup-scrolled {
+	overflow: auto;
+	}
+
+.leaflet-oldie .leaflet-popup-content-wrapper {
+	-ms-zoom: 1;
+	}
+.leaflet-oldie .leaflet-popup-tip {
+	width: 24px;
+	margin: 0 auto;
+
+	-ms-filter: "progid:DXImageTransform.Microsoft.Matrix(M11=0.70710678, M12=0.70710678, M21=-0.70710678, M22=0.70710678)";
+	filter: progid:DXImageTransform.Microsoft.Matrix(M11=0.70710678, M12=0.70710678, M21=-0.70710678, M22=0.70710678);
+	}
+
+.leaflet-oldie .leaflet-control-zoom,
+.leaflet-oldie .leaflet-control-layers,
+.leaflet-oldie .leaflet-popup-content-wrapper,
+.leaflet-oldie .leaflet-popup-tip {
+	border: 1px solid #999;
+	}
+
+
+/* div icon */
+
+.leaflet-div-icon {
+	background: #fff;
+	border: 1px solid #666;
+	}
+
+
+/* Tooltip */
+/* Base styles for the element that has a tooltip */
+.leaflet-tooltip {
+	position: absolute;
+	padding: 6px;
+	background-color: #fff;
+	border: 1px solid #fff;
+	border-radius: 3px;
+	color: #222;
+	white-space: nowrap;
+	-webkit-user-select: none;
+	-moz-user-select: none;
+	-ms-user-select: none;
+	user-select: none;
+	pointer-events: none;
+	box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+	}
+.leaflet-tooltip.leaflet-interactive {
+	cursor: pointer;
+	pointer-events: auto;
+	}
+.leaflet-tooltip-top:before,
+.leaflet-tooltip-bottom:before,
+.leaflet-tooltip-left:before,
+.leaflet-tooltip-right:before {
+	position: absolute;
+	pointer-events: none;
+	border: 6px solid transparent;
+	background: transparent;
+	content: "";
+	}
+
+/* Directions */
+
+.leaflet-tooltip-bottom {
+	margin-top: 6px;
+}
+.leaflet-tooltip-top {
+	margin-top: -6px;
+}
+.leaflet-tooltip-bottom:before,
+.leaflet-tooltip-top:before {
+	left: 50%;
+	margin-left: -6px;
+	}
+.leaflet-tooltip-top:before {
+	bottom: 0;
+	margin-bottom: -12px;
+	border-top-color: #fff;
+	}
+.leaflet-tooltip-bottom:before {
+	top: 0;
+	margin-top: -12px;
+	margin-left: -6px;
+	border-bottom-color: #fff;
+	}
+.leaflet-tooltip-left {
+	margin-left: -6px;
+}
+.leaflet-tooltip-right {
+	margin-left: 6px;
+}
+.leaflet-tooltip-left:before,
+.leaflet-tooltip-right:before {
+	top: 50%;
+	margin-top: -6px;
+	}
+.leaflet-tooltip-left:before {
+	right: 0;
+	margin-right: -12px;
+	border-left-color: #fff;
+	}
+.leaflet-tooltip-right:before {
+	left: 0;
+	margin-left: -12px;
+	border-right-color: #fff;
+	}
+
+/* Printing */
+
+@media print {
+	/* Prevent printers from removing background-images of controls. */
+	.leaflet-control {
+		-webkit-print-color-adjust: exact;
+		print-color-adjust: exact;
+		}
+	}
+</style>
+
+<div class="app">
+  <header class="top">
+    <div class="brand"><svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14.5" fill="#fff" fill-opacity=".16" stroke="#fff" stroke-opacity=".55" stroke-width="1.5"/><path d="M16 5.5l4.8 10.5L16 26.5l-4.8-10.5z" fill="var(--ticket)"/><path d="M16 16l4.8 0L16 26.5z" fill="#000" fill-opacity=".18"/><circle cx="16" cy="16" r="2.2" fill="#fff"/></svg>Queue Compass</div>
+    <div class="status" id="status"><span class="dot" id="dot"></span><span id="statusText">Typical waits</span></div>
+  </header>
+
+  <main id="planView">
+    <div class="hero" id="hero"></div>
+    <section class="block" style="padding-top:4px">
+      <h2 class="sec"><span class="num">1</span>Pick your park</h2>
+      <div class="parks" id="parkSeg" role="group" aria-label="Park"></div>
+      <div id="eventBlock" hidden>
+        <button type="button" class="toggle" id="eventToggle" aria-pressed="false"><span class="tico" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M12 6c-1-2 0-3.5 1.5-4" stroke="#9BE15D" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M12 6.5c-4.5-2-9 .8-9 6.5s4.2 8 9 8 9-2.3 9-8-4.5-8.5-9-6.5z" fill="#FF7A1A"/><path d="M7.5 11.5l2 1.5-2 .5zM16.5 11.5l-2 1.5 2 .5zM8 16.5c2.5 1.6 5.5 1.6 8 0l-1.3-.2-1.2.8-1.5-.8-1.5.8-1.2-.8z" fill="#2A0F4A"/></svg></span><span class="tname" id="eventName">Halloween Horror Nights</span><span class="tsub" id="eventSub"></span><span class="sw" aria-hidden="true"></span></button>
+      </div>
+    </section>
+
+    <section class="block">
+      <div class="sechead"><h2 class="sec"><span class="num">2</span><label for="loc">Where are you?</label></h2><button type="button" class="chipbtn gpsbtn" id="gpsBtn" aria-pressed="false">Use my location</button></div>
+      <select id="loc"></select>
+      <p class="hint" id="gpsLine" style="margin:0" hidden></p>
+    </section>
+
+    <section class="block">
+      <h2 class="sec"><span class="num">3</span>Your time</h2>
+      <div class="panel">
+      <div class="seg" id="startSeg" role="group" aria-label="Start time">
+        <button type="button" data-start="now">Start now</button>
+        <button type="button" data-start="open" id="openBtn">At park open</button>
+        <button type="button" data-start="custom">Pick a time</button>
+      </div>
+      <div class="row2">
+        <div class="field" id="startField"><label class="hint" for="startTime">Start at</label><input type="time" id="startTime"></div>
+        <div class="field"><label class="hint" for="endTime">Finish everything by</label><input type="time" id="endTime"></div>
+      </div>
+      <div class="field"><span class="hint">How busy is today? (adjusts historical waits)</span>
+        <div class="seg" id="crowdSeg" role="group" aria-label="Crowd level">
+          <button type="button" data-crowd="0.65">Quiet</button>
+          <button type="button" data-crowd="1">Typical</button>
+          <button type="button" data-crowd="1.35">Packed</button>
+        </div>
+      </div>
+      <div class="field"><span class="hint">Walking pace</span>
+        <div class="seg" id="paceSeg" role="group" aria-label="Walking pace">
+          <button type="button" data-pace="fast">Fast</button>
+          <button type="button" data-pace="normal">Normal</button>
+          <button type="button" data-pace="slow">Slow</button>
+          <button type="button" data-pace="auto">Auto</button>
+        </div>
+        <span class="hint" id="paceLine"></span>
+      </div>
+      </div>
+    </section>
+
+    <section class="block">
+      <div class="sechead">
+        <h2 class="sec"><span class="num">4</span>What do you want to do?</h2>
+        <div class="tools"><button class="chipbtn" id="selAll" type="button">All</button><button class="chipbtn" id="selNone" type="button">None</button></div>
+      </div>
+      <p class="hint" style="margin:0">Tick what you want. ★ marks a must-do, so the route never drops it. Tap a wait sign to type the posted wait from the official app.</p>
+      <div id="liveNote"></div>
+      <details class="addbox" id="feedBox"><summary>Check what the live feed lists</summary><div id="feedList"></div></details>
+      <div id="rideList" style="display:grid;gap:12px"></div>
+      <details class="addbox" id="addBox"><summary id="addSummary">Add something that isn't listed</summary>
+        <div class="addform">
+          <div class="field"><label class="hint" for="addName">Name</label><input type="text" id="addName" placeholder="Name from the event map or official app"></div>
+          <div class="row2">
+            <div class="field"><label class="hint" for="addKind">Type</label><select id="addKind"><option value="house">Haunted house</option><option value="zone">Scare zone</option><option value="show">Show</option><option value="ride">Ride</option></select></div>
+            <div class="field"><label class="hint" for="addLand">Area</label><select id="addLand"></select></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label class="hint" for="addWait">Posted wait now (min)</label><input type="number" inputmode="numeric" min="0" max="300" id="addWait" placeholder="Leave blank if unknown"></div>
+            <div class="field"><label class="hint" for="addDur">How long it takes (min)</label><input type="number" inputmode="numeric" min="1" max="90" id="addDur" placeholder="5"></div>
+          </div>
+          <div class="tools" style="align-items:center"><button class="chipbtn" id="addBtn" type="button">Add to my list</button><span class="hint" id="addMsg" role="status"></span></div>
+        </div>
+      </details>
+    </section>
+    <div class="foot">
+      <span>Unofficial fan tool. Not affiliated with or endorsed by Universal. Your location stays on your phone and is never sent anywhere. Live waits come from the free ThemeParks.wiki feed, which mirrors posted waits. Historical waits are typical averages by hour and get better as the app records live waits on your phone.</span>
+      <span><button class="chipbtn" id="resetDay" type="button">Start a new day</button> clears rides you marked done.</span>
+    </div>
+  </main>
+
+  <main id="routeView" hidden>
+    <div id="routeBody"></div>
+  </main>
+</div>
+
+<div class="cta" id="cta"><button type="button" id="buildBtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.5 18H15a3 3 0 000-6H9a3 3 0 010-6h6.5"/></svg><span id="buildLabel">Build my route</span></button></div>
+<nav class="tabs"><div>
+  <button type="button" id="tabPlan" aria-pressed="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Plan</button>
+  <button type="button" id="tabRoute" aria-pressed="false"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.5 18H15a3 3 0 000-6H9a3 3 0 010-6h6.5"/></svg>My route</button>
+</div></nav>
+
+<script>
+(function(){
+"use strict";
+
+/* ---------- Park data ----------
+   peak = typical posted wait (min) at the midday peak on an average day.
+   dur  = minutes from boarding to exit (shows: show length).
+   kw   = name fragments used to match the live feed. */
+const PARKS = {
+  usf: {
+    name: "Universal Studios Florida", short: "Studios", open: "09:00", close: "21:00", layout: "ring",
+    event: {name: "Halloween Horror Nights", open: "18:30", close: "01:00"},
+    /* Horror Nights 35 (2026). Locations from the official app map: four houses sit in the soundstages
+       behind Minion Land, reached by Haunted House Access Path A (by the Universal Studios Store) or
+       Path B (by Music Plaza). Other areas also come from the official app map; "?" means still unknown. */
+    spurs: {"Soundstages": {via: "Production Central", extra: 4}},
+    eventRides: [
+      ["h_stranger","Stranger Things 5","Soundstages",120,5,["strangerthings"],"Haunted house · Access Path A or B"],
+      ["h_evildead","Evil Dead Burn","Soundstages",90,5,["evildead"],"Haunted house · Access Path A or B"],
+      ["h_madlands","MADLANDS: Caged Cannibals","Soundstages",75,5,["madlands","cagedcannibals"],"Haunted house · Access Path A or B"],
+      ["h_ozzy","Ozzy Osbourne: Prince of Darkness","Soundstages",90,5,["ozzy","princeofdarkness"],"Haunted house · Access Path A or B"],
+      ["h_jack","Jack & Oddfellow: Chaos & Control","Production Central",85,5,["oddfellow","chaosandcontrol"],"Haunted house · by Music Plaza"],
+      ["h_hellraiser","Hellraiser","World Expo",90,5,["hellraiser"],"Haunted house"],
+      ["h_sinners","Sinners","World Expo",80,5,["sinners"],"Haunted house"],
+      ["h_cyber","Cybergoria","San Francisco",75,5,["cybergoria"],"Haunted house"],
+      ["h_invasion","Invasion: Alien Abduction","Springfield",75,5,["alienabduction","invasion"],"Haunted house"],
+      ["h_bloodengutz","H.R. Bloodengutz Presents: A Halloween Fright-Tacular","?",70,5,["bloodengutz","frighttacular"],"Haunted house"],
+      ["z_sideshow","Sideshow of Decay","?",0,10,["sideshowofdecay"],"Scare zone","zone"],
+      ["z_clowntown","Downtown Clowntown","New York",0,10,["clowntown"],"Scare zone","zone"],
+      ["z_carnival","Infernal Carnival of Nightmares","Front gate",0,10,["infernalcarnival"],"Scare zone","zone"],
+      ["z_fortnite","Fortnitemares","Hollywood",0,10,["fortnitemares"],"Scare zone · on the lagoon","zone"],
+      ["c_deatheaters","Death Eaters Encounter","Diagon Alley",0,10,["deatheaters"],"Character encounter","zone"]
+    ],
+    feedName: /universal studios florida/i, qtId: 65,
+    lands: ["Front gate","Minion Land","Production Central","New York","San Francisco","Diagon Alley","World Expo","Springfield","DreamWorks Land","Hollywood"],
+    rides: [
+      ["gringotts","Harry Potter and the Escape from Gringotts","Diagon Alley",70,5,["gringotts"]],
+      ["hexkx","Hogwarts Express – King's Cross Station","Diagon Alley",35,5,["kingscross"],"Needs a park-to-park ticket. Drops you in Islands of Adventure."],
+      ["mummy","Revenge of the Mummy","New York",45,4,["mummy"]],
+      ["fallon","Race Through New York Starring Jimmy Fallon","New York",25,7,["fallon"]],
+      ["rockit","Hollywood Rip Ride Rockit","Production Central",45,3,["ripriderockit"]],
+      ["transformers","Transformers: The Ride-3D","Production Central",35,5,["transformers"]],
+      ["mayhem","Despicable Me Minion Mayhem","Minion Land",45,6,["minionmayhem"]],
+      ["villaincon","Illumination's Villain-Con Minion Blast","Minion Land",35,6,["villaincon"]],
+      ["fast","Fast & Furious – Supercharged","San Francisco",25,7,["furious"]],
+      ["mib","MEN IN BLACK Alien Attack","World Expo",25,5,["meninblack","alienattack"]],
+      ["simpsons","The Simpsons Ride","Springfield",30,6,["simpsonsride"]],
+      ["twirl","Kang & Kodos' Twirl 'n' Hurl","Springfield",15,3,["twirl"]],
+      ["et","E.T. Adventure","DreamWorks Land",40,6,["etadventure"]],
+      ["trolls","Trolls Trollercoaster","DreamWorks Land",40,3,["trollercoaster"]],
+      ["bourne","The Bourne Stuntacular","Hollywood",15,25,["bourne"],"Show",true],
+      ["animal","Animal Actors on Location!","DreamWorks Land",10,20,["animalactors"],"Show",true]
+    ]
+  },
+  ioa: {
+    name: "Islands of Adventure", short: "Islands", open: "09:00", close: "21:00", layout: "ring",
+    feedName: /islands of adventure/i, qtId: 64,
+    lands: ["Port of Entry","Marvel Super Hero Island","Toon Lagoon","Skull Island","Jurassic Park","Hogsmeade","The Lost Continent","Seuss Landing"],
+    rides: [
+      ["hagrid","Hagrid's Magical Creatures Motorbike Adventure","Hogsmeade",90,4,["hagrid"]],
+      ["forbidden","Harry Potter and the Forbidden Journey","Hogsmeade",50,5,["forbiddenjourney"]],
+      ["hippogriff","Flight of the Hippogriff","Hogsmeade",40,2,["hippogriff"]],
+      ["hexhs","Hogwarts Express – Hogsmeade Station","Hogsmeade",35,5,["hogsmeadestation"],"Needs a park-to-park ticket. Drops you in Universal Studios."],
+      ["veloci","Jurassic World VelociCoaster","Jurassic Park",75,3,["velocicoaster"]],
+      ["river","Jurassic Park River Adventure","Jurassic Park",40,6,["riveradventure"]],
+      ["ptera","Pteranodon Flyers","Jurassic Park",45,2,["pteranodon"]],
+      ["kong","Skull Island: Reign of Kong","Skull Island",40,6,["kong"]],
+      ["ripsaw","Dudley Do-Right's Ripsaw Falls","Toon Lagoon",45,6,["ripsaw"]],
+      ["bilge","Popeye & Bluto's Bilge-Rat Barges","Toon Lagoon",40,5,["bilge"]],
+      ["spidey","The Amazing Adventures of Spider-Man","Marvel Super Hero Island",40,5,["spiderman"]],
+      ["hulk","The Incredible Hulk Coaster","Marvel Super Hero Island",45,3,["hulk"]],
+      ["doom","Doctor Doom's Fearfall","Marvel Super Hero Island",30,2,["doom"]],
+      ["storm","Storm Force Accelatron","Marvel Super Hero Island",15,2,["stormforce"]],
+      ["cat","The Cat in The Hat","Seuss Landing",25,4,["catinthehat"]],
+      ["onefish","One Fish, Two Fish, Red Fish, Blue Fish","Seuss Landing",20,2,["onefish"]],
+      ["caro","Caro-Seuss-el","Seuss Landing",10,3,["caroseussel"]],
+      ["trolley","The High in the Sky Seuss Trolley Train Ride!","Seuss Landing",30,4,["trolley"]]
+    ]
+  },
+  epic: {
+    name: "Epic Universe", short: "Epic", open: "09:00", close: "21:00", layout: "hub", hub: "Celestial Park",
+    feedName: /epic universe/i, qtId: 334,
+    lands: ["Chronos entrance","Celestial Park","Super Nintendo World","Dark Universe","Isle of Berk","Ministry of Magic"],
+    rides: [
+      ["ministry","Harry Potter and the Battle at the Ministry","Ministry of Magic",100,6,["battleattheministry"]],
+      ["minecart","Mine-Cart Madness","Super Nintendo World",100,3,["minecart"]],
+      ["mariokart","Mario Kart: Bowser's Challenge","Super Nintendo World",80,5,["mariokart"]],
+      ["yoshi","Yoshi's Adventure","Super Nintendo World",50,5,["yoshi"]],
+      ["stardust","Stardust Racers","Celestial Park",80,2,["stardust"]],
+      ["carousel","Constellation Carousel","Celestial Park",20,3,["constellationcarousel"]],
+      ["monsters","Monsters Unchained: The Frankenstein Experiment","Dark Universe",75,6,["monstersunchained"]],
+      ["werewolf","Curse of the Werewolf","Dark Universe",45,2,["werewolf"]],
+      ["hiccup","Hiccup's Wing Gliders","Isle of Berk",60,2,["hiccup"]],
+      ["racers","Dragon Racer's Rally","Isle of Berk",40,3,["dragonracer"]],
+      ["fyre","Fyre Drill","Isle of Berk",30,4,["fyredrill"]],
+      ["untrainable","The Untrainable Dragon","Isle of Berk",20,25,["untrainable"],"Show",true],
+      ["cirque","Le Cirque Arcanus","Ministry of Magic",15,25,["cirqu"],"Show",true]
+    ]
+  }
+};
+for (const id in PARKS) {
+  PARKS[id].rides = PARKS[id].rides.map(r => ({id:r[0],name:r[1],land:r[2],peak:r[3],dur:r[4],kw:r[5],note:r[6]||"",show:!!r[7],fixedWait:r[7]?15:null}));
+  PARKS[id].eventRides = (PARKS[id].eventRides || []).map(r => ({id:r[0],name:r[1],land:r[2],peak:r[3],dur:r[4],kw:r[5],note:r[6],
+    hhn:true, house:r[7]!=="zone", zone:r[7]==="zone", show:false, fixedWait:r[7]==="zone"?0:null}));
+}
+
+/* Approximate centre point of each area, for "Use my location". Picking an area by hand while
+   location is on saves that GPS point for the area, so the guesses improve with use. */
+const GEO = {
+  usf: {center:[28.4765,-81.4693], lands:{
+    "Front gate":[28.4740,-81.4670], "Minion Land":[28.4746,-81.4681], "Production Central":[28.4753,-81.4673],
+    "New York":[28.4745,-81.4696], "San Francisco":[28.4752,-81.4711], "Diagon Alley":[28.4766,-81.4719],
+    "World Expo":[28.4782,-81.4713], "Springfield":[28.4790,-81.4700], "DreamWorks Land":[28.4790,-81.4682], "Hollywood":[28.4770,-81.4671],
+    "Soundstages":[28.4757,-81.4687]}},
+  ioa: {center:[28.4717,-81.4713], lands:{
+    "Port of Entry":[28.4722,-81.4688], "Marvel Super Hero Island":[28.4705,-81.4694], "Toon Lagoon":[28.4695,-81.4711],
+    "Skull Island":[28.4698,-81.4727], "Jurassic Park":[28.4712,-81.4738], "Hogsmeade":[28.4728,-81.4740],
+    "The Lost Continent":[28.4737,-81.4725], "Seuss Landing":[28.4733,-81.4703]}},
+  epic: {center:[28.4425,-81.4475], lands:{
+    "Chronos entrance":[28.4446,-81.4475], "Celestial Park":[28.4425,-81.4475], "Super Nintendo World":[28.4421,-81.4501],
+    "Dark Universe":[28.4405,-81.4489], "Isle of Berk":[28.4405,-81.4461], "Ministry of Magic":[28.4421,-81.4450]}}
+};
+
+/* Typical shape of waits through the day, relative to the midday peak. */
+const CURVE = [[420,.3],[540,.45],[600,.7],[660,.88],[720,1],[840,1],[900,.95],[960,.9],[1020,.85],[1080,.8],[1140,.72],[1200,.62],[1260,.5],[1380,.4]];
+/* Horror Nights: lines are longest in the first two or three hours, then fall off after midnight.
+   Times past midnight are counted as 24:00+ so the night stays one continuous timeline. */
+const HHN_CURVE = [[1080,.75],[1110,1],[1200,1],[1260,.9],[1320,.8],[1380,.68],[1440,.55],[1500,.42],[1560,.32]];
+function curve(t){
+  const C = eventOn() ? HHN_CURVE : CURVE;
+  if (t <= C[0][0]) return C[0][1];
+  for (let i=1;i<C.length;i++){
+    const [x1,y1]=C[i]; const [x0,y0]=C[i-1];
+    if (t <= x1) return y0 + (y1-y0)*(t-x0)/(x1-x0);
+  }
+  return C[C.length-1][1];
+}
+
+/* ---------- Storage (per-viewer, optional) ---------- */
+function load(k, d){ try { const v = localStorage.getItem("qc."+k); return v ? JSON.parse(v) : d; } catch(e){ return d; } }
+function save(k, v){ try { localStorage.setItem("qc."+k, JSON.stringify(v)); } catch(e){} }
+
+const S = Object.assign({
+  park: "usf", loc: {}, startMode: "now", start: "09:00", end: {}, crowd: 1,
+  sel: {}, must: {}, done: {}, overrides: {},
+  event: {}, custom: {}, extraLand: {}, calib: {}, seen: {}, gps: false, pace: {mode:"normal", speed:0, minutes:0}
+}, load("state", {}));
+let samples = load("samples", {});          // park -> ride -> hour -> [sum,count]
+const live = {};                             // park -> {rides:{id:{wait,status}}, extras:[], at}
+let tab = "plan";
+let lastPlan = null;
+
+function persist(){ save("state", {park:S.park,loc:S.loc,startMode:S.startMode,start:S.start,end:S.end,crowd:S.crowd,sel:S.sel,must:S.must,done:S.done,overrides:S.overrides,
+  event:S.event,custom:S.custom,pace:S.pace,mapMode:S.mapMode,extraLand:S.extraLand,calib:S.calib,seen:S.seen,gps:S.gps}); }
+
+/* ---------- Helpers ---------- */
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const norm = s => String(s).toLowerCase().replace(/&/g,"and").replace(/[^a-z0-9]/g,"");
+const toMin = hhmm => { const [h,m] = String(hhmm||"0:0").split(":").map(Number); return h*60+(m||0); };
+const nowMin = () => { const d = new Date(); return d.getHours()*60 + d.getMinutes() + d.getSeconds()/60; };
+function fmt(t){ t = Math.round(t); let h = Math.floor(t/60)%24, m = t%60; const ap = h>=12?"PM":"AM"; h = h%12||12; return h+":"+String(m).padStart(2,"0")+" "+ap; }
+function fmtShort(t){ return fmt(t).replace(" AM","a").replace(" PM","p"); }
+const round5 = w => Math.max(5, Math.round(w/5)*5);
+const park = () => PARKS[S.park];
+const eventOn = () => !!(park().event && S.event[S.park]);
+const spurs = () => (eventOn() && park().spurs) || {};            // extra areas that only matter on event nights
+const allLands = () => park().lands.concat(Object.keys(spurs()));
+const K = () => S.park + (eventOn() ? "_hhn" : "");          // selections, finish time and samples are kept per day/night
+const hours = () => eventOn() ? park().event : park();
+const T = m => (eventOn() && m < 720) ? m + 1440 : m;        // after-midnight times continue the night
+const nowT = () => T(nowMin());
+function allRides(){
+  const p = park(), L = live[S.park], el = S.extraLand[S.park] || {};
+  const ex = ((L && L.extras) || []).map(r => Object.assign({}, r, {land: el[r.id] || "?"}));
+  const cu = (S.custom[S.park] || []).filter(c => !!c.event === eventOn());
+  const ev = eventOn() ? p.eventRides.map(r => Object.assign({}, r, {land: el[r.id] || r.land})) : [];
+  return p.rides.concat(ev, ex, cu);
+}
+
+/* ---------- Walking model ----------
+   Ring parks: lands sit around a lagoon in loop order; each step around the loop ≈ 4 min.
+   Epic Universe: hub-and-spoke through Celestial Park. */
+const HERE = "__here";
+/* Walking pace: preset multipliers, or Auto, which compares your GPS-measured speed with the
+   ~70 m/min the walk model assumes. */
+const PACE = {fast:0.8, normal:1, slow:1.35};
+function paceFactor(){
+  const pc = S.pace || {};
+  if (pc.mode === "auto") return pc.minutes >= 3 && pc.speed ? Math.min(2, Math.max(0.6, 70 / pc.speed)) : 1;
+  return PACE[pc.mode] || 1;
+}
+function walk(from, to){ return Math.max(1, Math.round(walkBase(from, to) * paceFactor())); }
+function walkBase(from, to){
+  if (from === HERE){   // first leg from your live GPS position: straight-line distance plus 35% for paths, at ~70 m/min
+    const me = myPoint(), pt = to !== "?" && landPoint(S.park, to);
+    if (!me || !pt) return walkBase(S.loc[S.park] || park().lands[0], to);
+    return Math.max(1, Math.round(meters(me, pt) * 1.35 / 70));
+  }
+  if (from === to) return 2;
+  const sp = spurs(), base = l => sp[l] ? [sp[l].via, sp[l].extra] : [l, 0];
+  const [fa, fe] = base(from), [ta, te] = base(to);
+  if (fe || te) return (fa === ta ? 2 : walkRing(fa, ta)) + fe + te;
+  return walkRing(from, to);
+}
+function walkRing(from, to){
+  const p = park();
+  if (from === to) return 2;
+  if (from === "?" || to === "?") return 8;
+  const a = p.lands.indexOf(from), b = p.lands.indexOf(to);
+  if (a < 0 || b < 0) return 8;
+  if (p.layout === "hub"){
+    const leg = l => l === p.hub ? 0 : (l === p.lands[0] ? 4 : 6);
+    return Math.max(3, leg(from) + leg(to));
+  }
+  const n = p.lands.length, d = Math.abs(a-b), steps = Math.min(d, n-d);
+  return 2 + steps*4;
+}
+
+/* ---------- Waits ---------- */
+function histWait(r, t){
+  if (r.fixedWait != null) return r.fixedWait;
+  let base = r.peak * S.crowd * curve(t);
+  const h = Math.floor(t/60);
+  const smp = samples[K()] && samples[K()][r.id] && samples[K()][r.id][h];
+  if (smp && smp[1] >= 3) base = base*0.5 + (smp[0]/smp[1])*0.5;
+  return base;
+}
+function currentWait(r){
+  const o = S.overrides[S.park] && S.overrides[S.park][r.id];
+  if (o && Date.now() - o.at < 75*60000) return {wait:o.wait, src:"you"};
+  const L = live[S.park];
+  if (L && L.rides[r.id] && Date.now() - L.at < 40*60000){
+    const x = L.rides[r.id];
+    if (x.status !== "OPERATING") return {wait:null, src:"live", status:x.status};
+    if (x.wait != null) return {wait:x.wait, src:"live"};
+  }
+  return null;
+}
+function waitAt(r, t, now){
+  if (r.fixedWait != null) return r.fixedWait;
+  const h = histWait(r, t);
+  const c = currentWait(r);
+  if (!c || c.wait == null) return h;
+  const hNow = Math.max(5, histWait(r, now));
+  const ratio = Math.min(3, Math.max(0.3, c.wait / hNow));
+  const w = Math.exp(-Math.max(0, t-now)/150);   // live reading fades toward history over ~2.5 h
+  return Math.max(0, h * (1 + (ratio-1)*w));
+}
+function unavailable(r){ const c = currentWait(r); return c && c.status ? c.status : null; }
+
+/* ---------- Live data ---------- */
+async function getJSON(url){
+  const ctl = new AbortController(); const tm = setTimeout(()=>ctl.abort(), 9000);
+  try { const r = await fetch(url, {signal:ctl.signal}); if (!r.ok) throw new Error(r.status); return await r.json(); }
+  finally { clearTimeout(tm); }
+}
+async function parkEntityId(pid){
+  const cache = load("ids", {});
+  if (cache[pid]) return cache[pid];
+  const d = await getJSON("https://api.themeparks.wiki/v1/destinations");
+  const dest = (d.destinations||[]).find(x => /universal orlando/i.test(x.name));
+  if (!dest) throw new Error("no destination");
+  for (const k in PARKS){ const m = dest.parks.find(p => PARKS[k].feedName.test(p.name)); if (m) cache[k] = m.id; }
+  save("ids", cache);
+  if (!cache[pid]) throw new Error("park not in feed");
+  return cache[pid];
+}
+function matchRide(pid, name){
+  const n = norm(name);
+  const ev = (pid === S.park && eventOn()) ? PARKS[pid].eventRides : [];
+  return PARKS[pid].rides.concat(ev).find(r => r.kw.some(k => n.includes(k)))
+      || (S.custom[pid] || []).find(c => n && (n.includes(c.kw[0]) || c.kw[0].includes(n)));
+}
+async function fetchLive(pid){
+  const p = PARKS[pid]; const out = {rides:{}, extras:[], at:Date.now()};
+  let list = [], source = "ThemeParks.wiki";
+  try {
+    const id = await parkEntityId(pid);
+    const d = await getJSON("https://api.themeparks.wiki/v1/entity/"+id+"/live");
+    list = (d.liveData||[]).filter(x => x.entityType === "ATTRACTION" || x.entityType === "SHOW")
+      .map(x => ({name:x.name, status:x.status, wait: x.queue && x.queue.STANDBY ? x.queue.STANDBY.waitTime : null, show:x.entityType==="SHOW"}));
+  } catch(e){
+    source = "queue-times.com";
+    const d = await getJSON("https://queue-times.com/parks/"+p.qtId+"/queue_times.json");
+    const rides = (d.rides||[]).concat(...(d.lands||[]).map(l => l.rides||[]));
+    list = rides.map(x => ({name:x.name, status:x.is_open?"OPERATING":"CLOSED", wait:x.wait_time, show:false}));
+  }
+  if (!list.length) throw new Error("empty");
+  const h = Math.floor(nowT()/60), sk = K();
+  samples[sk] = samples[sk] || {};
+  out.source = source; out.raw = [];
+  for (const x of list){
+    const r = matchRide(pid, x.name);
+    out.raw.push({name:x.name, status:x.status||"OPERATING", wait:x.wait, show:x.show,
+      used: r ? "Matched to "+r.name : (!x.show && (x.wait != null || eventOn())) ? "Added under More from the live feed" : x.show ? "Show listing, not used for routes" : "No wait posted, not used"});
+    if (r){
+      out.rides[r.id] = {wait:x.wait, status:x.status||"OPERATING"};
+      if (x.wait != null && x.status === "OPERATING" && !r.show){
+        const s = samples[sk][r.id] = samples[sk][r.id] || {};
+        const c = s[h] = s[h] || [0,0]; c[0] += x.wait; c[1] += 1;
+      }
+    } else if (!x.show && (x.wait != null || eventOn())) {
+      const id = "x_"+norm(x.name).slice(0,24);
+      out.extras.push({id, name:x.name, land:"?", peak:Math.max(10,(x.wait != null ? x.wait : 60)/Math.max(.3,curve(nowT()))), dur:5, kw:[norm(x.name)], note:"From the live feed", show:false, fixedWait:null, extra:true});
+      out.rides[id] = {wait:x.wait, status:x.status||"OPERATING"};
+    }
+  }
+  save("samples", samples);
+  return out;
+}
+let liveFailed = false;
+async function refreshLive(){
+  setStatus("Checking live waits…", false);
+  try {
+    live[S.park] = await fetchLive(S.park); liveFailed = false;
+    if (eventOn()){   // on event nights, new houses from the feed start out ticked
+      const seen = S.seen[K()] = S.seen[K()] || {}, sel = S.sel[K()] = S.sel[K()] || [];
+      for (const x of live[S.park].extras) if (!seen[x.id]){ seen[x.id] = 1; if (!sel.includes(x.id)) sel.push(x.id); }
+      persist();
+    }
+  }
+  catch(e){ liveFailed = true; }
+  renderStatus(); renderRides();
+  if (tab === "route") buildRoute(true);
+}
+
+/* ---------- Route optimizer ---------- */
+function startTime(){
+  const h = hours(), open = T(toMin(h.open)), n = nowT();
+  let close = T(toMin(h.close)); if (close <= open) close += 1440;
+  if (S.startMode === "custom") return {t:T(toMin(S.start)), note:""};
+  if (S.startMode === "open") return {t:open, note:""};
+  if (n < open || n > close) return {t:open, note:(eventOn() ? park().event.name+" hasn't started" : "The park isn't open")+" right now, so this plan starts at "+fmt(open)+"."};
+  return {t:n, note:""};
+}
+function simulate(order, t0, loc0, now, deadline){
+  let t = t0, loc = loc0; const steps = [];
+  for (const r of order){
+    const wk = walk(loc, r.land); t += wk;
+    const arrive = t; const w = waitAt(r, t, now); t += w + r.dur;
+    steps.push({r, walk:wk, arrive, wait:w, end:t, fits: t <= deadline});
+    loc = r.land;
+  }
+  return steps;
+}
+function score(steps, must){
+  let s = 0, lastEnd = 0;
+  for (const st of steps){ if (st.fits){ s += must[st.r.id] ? 1000 : 1; lastEnd = st.end; } }
+  const total = steps.length ? steps[steps.length-1].end : 0;
+  return s*1e6 - lastEnd*10 - total*0.01;
+}
+function optimize(rides, t0, loc0, now, deadline, must){
+  if (rides.length <= 1) return rides.slice();
+  const evalO = o => score(simulate(o, t0, loc0, now, deadline), must);
+  const greedy = (rand) => {
+    const left = rides.slice(), out = []; let t = t0, loc = loc0;
+    while (left.length){
+      const c = left.map(r => { const wk = walk(loc, r.land); return {r, cost: wk + waitAt(r, t+wk, now) + r.dur - (must[r.id] ? 5 : 0)}; })
+                    .sort((a,b) => a.cost-b.cost);
+      const pick = c[rand ? Math.floor(Math.random()*Math.min(3,c.length)) : 0];
+      out.push(pick.r); left.splice(left.indexOf(pick.r),1);
+      const wk = walk(loc, pick.r.land); t += wk + waitAt(pick.r, t+wk, now) + pick.r.dur; loc = pick.r.land;
+    }
+    return out;
+  };
+  const improve = (o) => {
+    let best = evalO(o), better = true, rounds = 0;
+    while (better && rounds++ < 30){
+      better = false;
+      for (let i=0;i<o.length-1;i++) for (let j=i+1;j<o.length;j++){
+        const a = o.slice(0,i).concat(o.slice(i,j+1).reverse(), o.slice(j+1));   // 2-opt
+        const sa = evalO(a); if (sa > best + 1e-9){ o = a; best = sa; better = true; continue; }
+        const b = o.slice(); const [m] = b.splice(i,1); b.splice(j,0,m);           // move later
+        const sb = evalO(b); if (sb > best + 1e-9){ o = b; best = sb; better = true; continue; }
+        const c = o.slice(); const [m2] = c.splice(j,1); c.splice(i,0,m2);         // move earlier
+        const sc = evalO(c); if (sc > best + 1e-9){ o = c; best = sc; better = true; }
+      }
+    }
+    return {o, s:best};
+  };
+  let best = improve(greedy(false));
+  const tries = rides.length > 16 ? 10 : rides.length > 10 ? 20 : 35;
+  for (let k=0;k<tries;k++){ const r = improve(greedy(true)); if (r.s > best.s) best = r; }
+  return best.o;
+}
+
+function buildRoute(auto){
+  const prev = lastPlan && lastPlan.key === K() ? lastPlan : null;
+  const p = park(), now = nowT();
+  const sel = S.sel[K()] || [], done = S.done[K()] || {}, must = S.must[K()] || {};
+  const pool = allRides().filter(r => sel.includes(r.id) && !done[r.id]);
+  const closed = pool.filter(r => unavailable(r));
+  const rides = pool.filter(r => !unavailable(r));
+  const st = startTime();
+  let deadline = T(toMin(S.end[K()] || hours().close));
+  if (deadline <= st.t) deadline += 24*60;
+  const fromHere = st.t <= now + 1 && !!myPoint() && lastFix.acc <= 60;
+  const loc = fromHere ? HERE : (S.loc[S.park] || p.lands[0]);
+  const order = optimize(rides, st.t, loc, now, deadline, must);
+  const steps = simulate(order, st.t, loc, now, deadline);
+  const naive = simulate(rides, st.t, loc, now, deadline);
+  lastPlan = {steps, closed, st, deadline, naive, key:K(), checkedAt: Date.now(), fromHere, pt: myPoint(), doneCount: Object.keys(done).filter(k=>done[k]).length, change:null};
+  if (prev){
+    const ids = pl => pl.steps.filter(x => x.fits).map(x => x.r.id).join(",");
+    const keep = prev.change && Date.now() - prev.change.at < 20*60000 ? prev.change : null;
+    if (auto && ids(prev) !== ids(lastPlan)){
+      const pn = prev.steps.find(x => x.fits), nn = steps.find(x => x.fits);
+      const reopened = prev.closed.find(r => !closed.some(c => c.id === r.id));
+      let why = "Wait times shifted, so the order was updated.";
+      if (pn && (!nn || pn.r.id !== nn.r.id)){
+        const u = unavailable(pn.r), c = currentWait(pn.r);
+        if (u) why = pn.r.name+" is "+(u === "DOWN" ? "temporarily down" : "closed")+". It's out of the route until it reopens.";
+        else if (c && c.wait != null) why = pn.r.name+" is now posting "+Math.round(c.wait)+" min, so it moved later.";
+      } else if (reopened) why = reopened.name+" reopened and is back in your route.";
+      lastPlan.change = {at: Date.now(), why, next: nn ? nn.r.name : null, wasNext: pn && nn && pn.r.id !== nn.r.id ? pn.r.name : null};
+      try { if (navigator.vibrate) navigator.vibrate([120,80,120]); } catch(e){}
+    } else lastPlan.change = keep;
+  }
+  renderRoute();
+}
+
+/* ---------- Rendering ---------- */
+function setStatus(text, isLive){ $("statusText").textContent = text; $("dot").className = "dot" + (isLive ? " live" : ""); }
+function renderFeed(){
+  const L = live[S.park], p = park(), qt = "https://queue-times.com/parks/"+p.qtId+"/queue_times";
+  const link = '<p class="hint" style="margin:8px 0 0">You can also check in any browser: <a href="'+qt+'" target="_blank" rel="noopener">queue-times.com page for '+esc(p.name)+' ↗</a></p>';
+  if (!L || liveFailed){ $("feedList").innerHTML = '<p class="hint" style="margin:8px 0 0">The live feed isn\'t reachable from this page, so there\'s nothing to show. The installed app lists everything here.</p>'+link; return; }
+  const rows = L.raw.slice().sort((a,b) => a.name.localeCompare(b.name)).map(x =>
+    '<div class="feedrow"><b>'+esc(x.name)+'</b><em>'+(x.status !== "OPERATING" ? esc(x.status.toLowerCase()) : x.wait != null ? x.wait+' min' : 'open')+'</em><small>'+esc(x.used)+'</small></div>').join("");
+  $("feedList").innerHTML = '<p class="hint" style="margin:8px 0 0">'+L.raw.length+' listings from '+esc(L.source)+' at '+new Date(L.at).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})+'.</p><div class="feed">'+rows+'</div>'+link;
+}
+function renderStatus(){
+  renderFeed();
+  const L = live[S.park];
+  if (L && !liveFailed){
+    const t = new Date(L.at);
+    setStatus("Live · "+t.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"}), true);
+    $("liveNote").innerHTML = "";
+  } else {
+    setStatus("Typical waits", false);
+    $("liveNote").innerHTML = '<div class="banner"><b>Live waits aren\'t reachable from this page.</b><span>Routes use typical waits for each hour of the day. For the most accurate route, tap any wait sign and enter what the official app shows right now. The installed version of Queue Compass pulls live waits automatically.</span><span><button class="chipbtn" type="button" id="retryLive">Try live waits again</button></span></div>';
+    const b = $("retryLive"); if (b) b.onclick = refreshLive;
+  }
+}
+function renderParkControls(){
+  const seg = $("parkSeg");
+  const GLYPH = {
+    usf: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c3 3 3 13 0 16M12 4c-3 3-3 13 0 16"/></svg>',
+    ioa: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 18c2 1.5 4 1.5 6 0s4-1.5 6 0 4 1.5 6 0"/><path d="M12 15V5l6 4-6 2"/></svg>',
+    epic: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><circle cx="19" cy="19" r="1.4"/><circle cx="5" cy="18" r="1"/></svg>'
+  };
+  const SUB = {usf:"Universal Studios Florida", ioa:"Islands of Adventure", epic:"Epic Universe"};
+  seg.innerHTML = Object.keys(PARKS).map(k => '<button type="button" data-park="'+k+'" aria-pressed="'+(k===S.park)+'">'+GLYPH[k]+'<span class="pk">'+esc(PARKS[k].short)+'</span><span class="ps">'+SUB[k]+'</span></button>').join("");
+  document.documentElement.classList.toggle("hhn", eventOn());
+  const tc = document.querySelector('meta[name="theme-color"]'); if (tc) tc.setAttribute("content", eventOn() ? "#2A0F4A" : "#0B4566");
+  renderHero();
+  seg.querySelectorAll("button").forEach(b => b.onclick = () => { S.park = b.dataset.park; persist(); renderAll(); if (!live[S.park]) refreshLive(); });
+  const p = park();
+  $("loc").innerHTML = allLands().map(l => '<option'+((S.loc[S.park]||p.lands[0])===l?' selected':'')+'>'+esc(l)+'</option>').join("");
+  $("addLand").innerHTML = allLands().map(l => '<option>'+esc(l)+'</option>').join("");
+  $("eventBlock").hidden = !p.event;
+  if (p.event){
+    $("eventToggle").setAttribute("aria-pressed", String(eventOn()));
+    $("eventName").textContent = p.event.name;
+    $("eventSub").textContent = eventOn() ? "On. Event hours "+fmt(toMin(p.event.open))+" to "+fmt(toMin(p.event.close))+". Houses come from the live feed, or add them below." : "Turn on for an event night. Switches to event hours and night-time wait patterns.";
+  }
+  $("openBtn").textContent = eventOn() ? "At event start" : "At park open";
+  $("addSummary").textContent = eventOn() ? "Add a haunted house, scare zone or show" : "Add something that isn't listed";
+  $("endTime").value = S.end[K()] || hours().close;
+  $("startTime").value = S.start;
+  $("startSeg").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.start === S.startMode)));
+  $("startField").hidden = S.startMode !== "custom";
+  $("crowdSeg").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(Number(b.dataset.crowd) === S.crowd)));
+  renderPace();
+}
+const lvl = w => w < 30 ? " lo" : w < 60 ? " mid" : " hi";
+function renderPace(){
+  const pc = S.pace || {};
+  $("paceSeg").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.pace === (pc.mode || "normal"))));
+  let t = "";
+  if (pc.mode === "fast") t = "Walks are planned about 20% quicker than average.";
+  else if (pc.mode === "slow") t = "Walks are planned about 35% longer than average. Good for strollers, crowds or taking it easy.";
+  else if (pc.mode === "auto"){
+    if (pc.minutes >= 3 && pc.speed){
+      const pct = Math.round((paceFactor() - 1) * 100);
+      t = "Your measured pace is "+Math.round(pc.speed)+" m per minute over "+Math.round(pc.minutes)+" min of walking, so walks take "+(Math.abs(pct) < 5 ? "about the usual time." : "about "+Math.abs(pct)+"% "+(pct > 0 ? "longer" : "less")+" than average.");
+    } else t = geoId != null ? "Learning your pace as you walk. Needs about 3 minutes of walking ("+Math.round((pc.minutes||0)*10)/10+" so far)." : "Turn on Use my location and walk around. The app measures your real pace and uses it for every walk.";
+  }
+  $("paceLine").textContent = t; $("paceLine").hidden = !t;
+}
+function renderHero(){
+  const p = park(), h = hours();
+  const hr = new Date().getHours();
+  const greet = eventOn() ? "Ready for a scary night?" : hr < 12 ? "Good morning." : hr < 17 ? "Good afternoon." : "Good evening.";
+  $("hero").innerHTML = (eventOn() ? '<span class="ev">'+esc(p.event.name)+' · '+fmt(toMin(h.open))+' – '+fmt(toMin(h.close))+'</span>' : '')+
+    '<h1>'+greet+' Let\'s beat the lines at '+esc(eventOn() ? "Universal Studios" : p.name)+'.</h1>'+
+    '<p>Pick what you want to do and when you need to be done. Your route keeps updating as waits change.</p>';
+}
+function waitChip(r){
+  const c = currentWait(r), now = nowT();
+  if (c && c.status) return '<button type="button" class="wait down" data-edit="'+r.id+'" aria-label="Edit wait"><b>—</b><i>'+(c.status==="DOWN"?"Down":"Closed")+'</i></button>';
+  if (r.zone) return '<span class="wait"><b>'+r.dur+'</b><i>min walk</i></span>';
+  if (r.show) return '<button type="button" class="wait" data-edit="'+r.id+'" aria-label="Show"><b>'+r.dur+'</b><i>min show</i></button>';
+  if (c) return '<button type="button" class="wait live'+lvl(c.wait)+'" data-edit="'+r.id+'" aria-label="Edit wait"><b>'+Math.round(c.wait)+'</b><i>'+(c.src==="you"?"posted":"live")+'</i></button>';
+  const tw = round5(histWait(r, Math.max(now, T(toMin(hours().open)))));
+  return '<button type="button" class="wait'+lvl(tw)+'" data-edit="'+r.id+'" aria-label="Enter posted wait"><b>'+tw+'</b><i>typical</i></button>';
+}
+let editing = null;
+function renderRides(){
+  const p = park(), sel = S.sel[K()] || (S.sel[K()] = eventOn() ? [] : p.rides.filter(r=>!r.id.startsWith("hex")).map(r=>r.id));
+  const must = S.must[K()] || {}, done = S.done[K()] || {};
+  if (eventOn()){   // event houses and zones start out ticked the first time they appear
+    const seen = S.seen[K()] = S.seen[K()] || {};
+    for (const r of p.eventRides) if (!seen[r.id]){ seen[r.id] = 1; if (!sel.includes(r.id)) sel.push(r.id); }
+    persist();
+  }
+  const groups = {};
+  for (const r of allRides()){ const l = r.land === "?" ? (r.hhn ? "Horror Nights · set each area" : "More from the live feed") : r.land; (groups[l] = groups[l] || []).push(r); }
+  renderHero();
+  const order = ["Horror Nights · set each area"].concat(allLands(), ["More from the live feed"]).filter(l => groups[l]);
+  $("rideList").innerHTML = order.map(l => '<div class="land"><div class="lh">'+esc(l)+'</div>' + groups[l].map(r => {
+    const on = sel.includes(r.id), isDone = !!done[r.id];
+    const sub = isDone ? "Done today" : (r.note || (r.show ? "" : r.dur+" min ride"));
+    const areaSel = (r.custom || r.extra || r.hhn) ? '<select class="area" data-area="'+r.id+'" aria-label="Area for '+esc(r.name)+'">'+["?"].concat(allLands()).map(l => '<option value="'+esc(l)+'"'+(l===r.land?' selected':'')+'>'+(l==="?"?"Set its area…":esc(l))+'</option>').join("")+'</select>' : '';
+    const rm = r.custom ? '<button type="button" class="chipbtn rm" data-remove="'+r.id+'">Remove</button>' : '';
+    return '<div class="ride'+(isDone?" off":"")+'">'+
+      '<input type="checkbox" id="c_'+r.id+'" data-sel="'+r.id+'"'+(on?" checked":"")+'>'+
+      '<div class="rname"><label for="c_'+r.id+'"><span>'+esc(r.name)+'</span></label><small>'+esc(sub)+'</small>'+areaSel+rm+'</div>'+
+      '<button type="button" class="star" data-must="'+r.id+'" aria-pressed="'+(!!must[r.id])+'" aria-label="Must-do">★</button>'+
+      waitChip(r)+
+      (editing===r.id ? '<div class="editwait"><input type="number" inputmode="numeric" min="0" max="300" id="ew_'+r.id+'" placeholder="Minutes"><button class="chipbtn" type="button" data-savewait="'+r.id+'">Save</button><button class="chipbtn" type="button" data-clearwait="'+r.id+'">Clear</button></div>' : '')+
+      '</div>';
+  }).join("") + '</div>').join("");
+  if (editing){ const i = $("ew_"+editing); if (i) i.focus(); }
+}
+function renderRoute(){
+  const P = lastPlan, body = $("routeBody");
+  if (!P){ body.innerHTML = '<div class="empty"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.5 18H15a3 3 0 000-6H9a3 3 0 010-6h6.5"/></svg><span>Pick your rides on the Plan tab, then tap <b>Build my route</b>.</span></div>'; return; }
+  const fit = P.steps.filter(s => s.fits), late = P.steps.filter(s => !s.fits);
+  if (!P.steps.length){
+    body.innerHTML = '<div class="empty">'+(P.doneCount ? "You've finished everything you picked. Nice work." : "No rides selected yet. Pick some on the Plan tab.")+'</div>' + closedHtml(P.closed);
+    return;
+  }
+  const totalWait = fit.reduce((a,s)=>a+s.wait,0), totalWalk = fit.reduce((a,s)=>a+s.walk,0);
+  const finish = fit.length ? fit[fit.length-1].end : P.st.t;
+  const naiveEnd = P.naive.length ? P.naive[P.naive.length-1].end : 0;
+  const allEnd = P.steps[P.steps.length-1].end;
+  const saved = Math.round(naiveEnd - allEnd);
+  const must = S.must[K()] || {};
+  const verdict = late.length
+    ? '<div class="verdict no">'+late.length+' of '+P.steps.length+' won\'t fit before '+fmt(P.deadline)+'. Drop a few, mark must-dos with ★, or push your finish time later.</div>'
+    : '<div class="verdict ok">Everything fits. You should finish around '+fmt(finish)+', with '+Math.max(0,Math.round(P.deadline-finish))+' min to spare.</div>';
+  const step = (s, i, isLate) => {
+    const c = currentWait(s.r);
+    const src = c && c.wait!=null && Math.abs(s.arrive - nowT()) < 20 ? '<span class="pill live">'+(c.src==="you"?"posted":"live")+'</span>' : '<span class="pill">forecast</span>';
+    return '<li class="step'+(i===0&&!isLate?" next":"")+'"><div class="when">'+fmtShort(s.arrive).replace(/([ap])$/,'<small>$1m</small>')+'</div><div class="card">'+
+      '<h3>'+esc(s.r.name)+'</h3>'+
+      '<div class="meta"><span>'+esc(s.r.land==="?"?"Location unknown":s.r.land)+'</span>'+(must[s.r.id]?'<span class="pill must">Must-do</span>':'')+src+'</div>'+
+      '<div class="meta"><span>Walk <b>'+s.walk+'</b> min'+(i===0 && !isLate && P.fromHere ? ' from you' : '')+'</span><span>'+(s.r.zone?'No line':s.r.show?'Arrive early <b>15</b> min':'Wait <b>~'+round5(s.wait)+'</b> min')+'</span><span>'+(s.r.zone?'Walk-through':s.r.show?'Show':(s.r.house||(s.r.extra&&eventOn()))?'Inside':'Ride')+' <b>'+s.r.dur+'</b> min</span><span>Out by <b>'+fmtShort(s.end)+'</b></span></div>'+
+      (s.r.note && !s.r.show && !s.r.custom && !s.r.extra ? '<div class="hint">'+esc(s.r.note)+'</div>' : '')+
+      (isLate ? '' : '<div class="actions"><button type="button" class="done" data-done="'+s.r.id+'">Done ✓</button><button type="button" data-skip="'+s.r.id+'">Skip</button></div>')+
+      '</div></li>';
+  };
+  const ch = P.change, nextFit = fit[0];
+  const changeHtml = ch ? '<div class="verdict upd"><b>Route updated at '+new Date(ch.at).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})+'</b><span>'+esc(ch.why)+(ch.next ? ' Next stop is now '+esc(ch.next)+'.' : '')+'</span>'+(ch.wasNext ? '<span class="hint">Already in line for '+esc(ch.wasNext)+'? Stay put and tap Done when you\'re off.</span>' : '')+'</div>' : '';
+  const L = live[S.park];
+  const autoLine = (L && !liveFailed)
+    ? 'Live waits recheck every 5 minutes and the route re-orders itself. Last check: '+new Date(L.at).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})+'.'
+    : 'Live waits aren\'t reachable here, so the route only changes when you enter a posted wait or tap Done.';
+  let dirLink = '';
+  if (nextFit && GEO[S.park] && nextFit.r.land !== "?"){
+    const pt = landPoint(S.park, nextFit.r.land);
+    dirLink = '<a class="maplink" href="https://www.google.com/maps/dir/?api=1&amp;destination='+pt[0]+','+pt[1]+'&amp;travelmode=walking" target="_blank" rel="noopener">Walking directions to '+esc(nextFit.r.land)+' in Google Maps ↗</a>';
+  }
+  body.innerHTML = changeHtml +
+    '<div class="summary">'+
+      '<div class="stat"><b>'+fit.length+'/'+P.steps.length+'</b><span>Rides fit</span></div>'+
+      '<div class="stat"><b>'+fmtShort(finish)+'</b><span>Finish</span></div>'+
+      '<div class="stat"><b>'+Math.round(totalWait/5)*5+'m</b><span>In line</span></div>'+
+      '<div class="stat"><b>'+totalWalk+'m</b><span>Walking</span></div>'+
+    '</div>'+
+    '<section class="block" style="padding-top:8px">'+verdict+
+      (P.st.note ? '<p class="hint" style="margin:0">'+esc(P.st.note)+'</p>' : '')+
+      (saved >= 10 ? '<p class="hint" style="margin:0">This order saves about <b>'+saved+' min</b> compared with riding them top to bottom.</p>' : '')+
+      '<div class="tools"><button class="chipbtn" type="button" id="replan">Replan from here, now</button></div>'+
+      '<p class="hint" style="margin:0">'+autoLine+'</p>'+
+    '</section>'+
+    (GEO[S.park] && fit.length ? mapSection() + dirLink + '</section>' : '')+
+    '<section class="block"><span class="label">Your route from '+esc(S.loc[S.park]||park().lands[0])+'</span><ol class="steps">'+fit.map((s,i)=>step(s,i,false)).join("")+'</ol></section>'+
+    (late.length ? '<section class="block late"><span class="label">Won\'t fit by '+fmt(P.deadline)+'</span><ol class="steps">'+late.map((s,i)=>step(s,i,true)).join("")+'</ol></section>' : '')+
+    closedHtml(P.closed)+
+    '<p class="hint">Tap <b>Done</b> after each ride. The app moves you to that spot and re-plans the rest from the current time and latest waits. Map areas are approximate.</p>';
+  if ($("mapBox")) mountMap(P);
+  const rp = $("replan"); if (rp) rp.onclick = () => { S.startMode = "now"; persist(); renderParkControls(); buildRoute(); };
+}
+function closedHtml(list){
+  if (!list.length) return "";
+  return '<section class="block"><span class="label">Down or closed right now</span><div class="banner">'+list.map(r=>esc(r.name)).join("<br>")+'<span class="hint">'+((live[S.park] && !liveFailed) ? 'Left out of the route. It comes back automatically when it reopens.' : 'Left out of the route. Replan when it reopens.')+'</span></div></section>';
+}
+/* Schematic park map drawn from the area points: walkway loop (or hub spokes), your route along it,
+   numbered stops, and your GPS dot when location is on. Drawn in metres, so it is to scale. */
+function legPoints(a, b){
+  const sp = spurs(), A = sp[a] ? sp[a].via : a, B = sp[b] ? sp[b].via : b;
+  if (A !== a || B !== b){
+    const out = A !== a ? [A] : [];
+    const mid = A === B ? [] : legPointsRing(A, B);
+    return out.concat(mid, B !== b ? [b] : []);
+  }
+  return legPointsRing(a, b);
+}
+function legPointsRing(a, b){
+  const p = park(), L = p.lands;
+  if (a === b || a === "?" || b === "?") return [b];
+  if (p.layout === "hub"){ return (a === p.hub || b === p.hub) ? [b] : [p.hub, b]; }
+  const n = L.length, i = L.indexOf(a), j = L.indexOf(b);
+  if (i < 0 || j < 0) return [b];
+  const fwd = (j - i + n) % n, dir = fwd <= n - fwd ? 1 : -1, out = [];
+  for (let k = i; k !== j; ){ k = (k + dir + n) % n; out.push(L[k]); }
+  return out;
+}
+function mapSvg(P){
+  const g = GEO[S.park]; if (!g || !P) return "";
+  const p = park(), kx = Math.cos(g.center[0]*Math.PI/180);
+  const proj = pt => [(pt[1]-g.center[1])*kx*111320, -(pt[0]-g.center[0])*111320];
+  const L = {}; allLands().forEach(l => L[l] = proj(landPoint(S.park, l)));
+  const me = (lastFix && Date.now()-lastFix.at < 600000 && meters(lastFix.pt, g.center) < 1500) ? proj(lastFix.pt) : null;
+  const all = Object.values(L).concat(me ? [me] : []);
+  const xs = all.map(a => a[0]), ys = all.map(a => a[1]);
+  const span = Math.max(Math.max(...xs)-Math.min(...xs), Math.max(...ys)-Math.min(...ys));
+  const pad = span*0.16 + 30, x0 = Math.min(...xs)-pad, y0 = Math.min(...ys)-pad;
+  const W = Math.max(...xs)+pad-x0, H = Math.max(...ys)+pad*1.25-y0, u = Math.max(W, H)/100;
+  const f = n => n.toFixed(1), o = [];
+  const line = (pts, attrs) => '<polyline points="'+pts.map(q => f(q[0])+","+f(q[1])).join(" ")+'" fill="none" stroke-linecap="round" stroke-linejoin="round" '+attrs+'/>';
+  if (p.layout === "ring"){
+    const r = Math.min(...p.lands.slice(1).map(l => Math.hypot(L[l][0], L[l][1])))*0.62;
+    o.push('<ellipse cx="0" cy="0" rx="'+f(r*1.15)+'" ry="'+f(r*0.9)+'" fill="var(--water)"/>');
+    o.push(line(p.lands.slice(1).concat(p.lands[1]).map(l => L[l]), 'stroke="var(--line)" stroke-width="'+f(u*2.2)+'"'));
+    o.push(line([L[p.lands[0]], L[p.lands[1]]], 'stroke="var(--line)" stroke-width="'+f(u*2.2)+'"'));
+    o.push(line([L[p.lands[0]], L[p.lands[p.lands.length-1]]], 'stroke="var(--line)" stroke-width="'+f(u*2.2)+'"'));
+  } else {
+    const h = L[p.hub];
+    o.push('<circle cx="'+f(h[0])+'" cy="'+f(h[1])+'" r="'+f(u*10)+'" fill="var(--water)"/>');
+    p.lands.forEach(l => { if (l !== p.hub) o.push(line([h, L[l]], 'stroke="var(--line)" stroke-width="'+f(u*2.2)+'"')); });
+  }
+  for (const [l, sp] of Object.entries(spurs())) o.push(line([L[sp.via], L[l]], 'stroke="var(--line)" stroke-width="'+f(u*2.2)+'" stroke-dasharray="'+f(u*1.5)+' '+f(u*1.2)+'"'));
+  // route
+  const fit = P.steps.filter(x => x.fits);
+  let cur = S.loc[S.park] || p.lands[0];
+  const legs = [], stops = {};
+  fit.forEach((x, i) => {
+    if (!L[x.r.land]) return;
+    (stops[x.r.land] = stops[x.r.land] || []).push(i+1);
+    if (x.r.land !== cur){ legs.push([cur].concat(legPoints(cur, x.r.land))); cur = x.r.land; }
+  });
+  legs.forEach((leg, i) => {
+    const pts = leg.map(l => L[l]);
+    if (i === 0 && me) pts[0] = me;
+    o.push(line(pts, i === 0
+      ? 'stroke="var(--accent)" stroke-width="'+f(u*1.6)+'"'
+      : 'stroke="var(--accent)" stroke-opacity=".45" stroke-width="'+f(u*1.1)+'" stroke-dasharray="'+f(u*2)+' '+f(u*2)+'"'));
+  });
+  const fs = u*2.9;
+  // you
+  const start = me || L[S.loc[S.park] || p.lands[0]];
+  if (start){
+    o.push('<circle cx="'+f(start[0])+'" cy="'+f(start[1])+'" r="'+f(u*4.2)+'" fill="var(--me)" fill-opacity=".22"/>');
+    o.push('<circle cx="'+f(start[0])+'" cy="'+f(start[1])+'" r="'+f(u*1.9)+'" fill="var(--me)" stroke="var(--surface)" stroke-width="'+f(u*.7)+'"/>');
+    o.push('<text x="'+f(start[0])+'" y="'+f(start[1]-u*5)+'" text-anchor="middle" font-size="'+f(fs)+'" font-weight="700" fill="var(--me)" stroke="var(--surface)" stroke-width="'+f(u*.9)+'" paint-order="stroke" font-family="var(--body)">'+(me?"You":"Start")+'</text>');
+  }
+  // areas + stop badges
+  allLands().forEach(l => {
+    const [x, y] = L[l], st = stops[l];
+    o.push('<circle cx="'+f(x)+'" cy="'+f(y)+'" r="'+f(u*1.1)+'" fill="var(--muted)"/>');
+    o.push('<text x="'+f(x)+'" y="'+f(y + (st ? u*7.2 : u*4.6))+'" text-anchor="middle" font-size="'+f(fs)+'" fill="var(--muted)" stroke="var(--surface)" stroke-width="'+f(u*.9)+'" paint-order="stroke" font-family="var(--body)">'+esc(l)+'</text>');
+    if (st){
+      const txt = st.length > 3 ? st[0]+"–"+st[st.length-1] : st.join(","), w = Math.max(u*6.4, (txt.length*0.62+1.6)*fs);
+      const first = st[0] === 1;
+      o.push('<rect x="'+f(x-w/2)+'" y="'+f(y-u*3.2)+'" width="'+f(w)+'" height="'+f(u*6.4)+'" rx="'+f(u*3.2)+'" fill="'+(first?"var(--ticket)":"var(--accent)")+'" stroke="var(--surface)" stroke-width="'+f(u*.6)+'"/>');
+      o.push('<text x="'+f(x)+'" y="'+f(y+fs*0.36)+'" text-anchor="middle" font-size="'+f(fs*1.05)+'" font-weight="700" fill="'+(first?"var(--ticket-ink)":"var(--accent-ink)")+'" font-family="var(--display)">'+txt+'</text>');
+    }
+  });
+  return '<svg viewBox="'+[x0,y0,W,H].map(f).join(" ")+'" role="img" aria-label="Map of '+esc(p.name)+' with your route. Yellow badge is your next stop.">'+o.join("")+'</svg>';
+}
+/* Street and satellite maps (Leaflet). Tiles come from OpenStreetMap and Esri; pages that can't
+   reach them fall back to the drawing. Area pins can be dragged to fix their positions. */
+let lmap = null, lview = null, youMarker = null, pinEdit = false, tilesBlocked = false, leafletP = null;
+const TILES = {
+  street: {url:"https://tile.openstreetmap.org/{z}/{x}/{y}.png", attr:"© OpenStreetMap contributors"},
+  sat: {url:"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", attr:"Imagery © Esri, Maxar, Earthstar Geographics"}
+};
+const mapMode = () => tilesBlocked ? "draw" : (S.mapMode || "draw");
+function myPoint(){ const g = GEO[S.park]; return (lastFix && Date.now()-lastFix.at < 600000 && meters(lastFix.pt, g.center) < 1500) ? lastFix.pt : null; }
+function mapSection(){
+  const m = mapMode(), hasCalib = S.calib[S.park] && Object.keys(S.calib[S.park]).length;
+  const btn = (k, t) => '<button type="button" data-map="'+k+'" aria-pressed="'+(m===k)+'"'+(tilesBlocked && k !== "draw" ? ' style="opacity:.45"' : '')+'>'+t+'</button>';
+  return '<section class="block"><div class="maphead"><span class="label" style="flex:1">Route map</span><div class="seg mini" id="mapSeg" role="group" aria-label="Map style">'+btn("draw","Drawing")+btn("street","Street")+btn("sat","Satellite")+'</div></div>'+
+    (tilesBlocked ? '<div class="banner"><b>Street and satellite maps work in the installed app.</b><span>This page isn\'t allowed to load map images, so it shows the drawing instead. Live waits and your location also need the installed app.</span></div>' : '')+
+    '<div class="mapcard" id="mapBox"></div>'+
+    (m !== "draw" ? '<div class="tools"><button class="chipbtn" type="button" id="pinEdit" aria-pressed="'+pinEdit+'">'+(pinEdit ? "Done moving pins" : "Move area pins")+'</button>'+(hasCalib ? '<button class="chipbtn" type="button" id="pinReset">Reset pins</button>' : '')+'</div>'+
+      (pinEdit ? '<p class="hint" style="margin:0">Drag each area\'s pin to where it really is. Your phone saves the new spots and uses them for location and the map.</p>' : '') : '');
+}
+function loadLeaflet(){
+  if (window.L && window.L.map) return Promise.resolve(window.L);
+  if (leafletP) return leafletP;
+  const add = src => new Promise((res, rej) => { const el = document.createElement("script"); el.src = src; el.onload = res; el.onerror = rej; document.head.appendChild(el); });
+  leafletP = add("leaflet.js").catch(() => add("https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"))
+    .then(() => { if (!window.L) throw new Error("no leaflet"); return window.L; })
+    .catch(e => { leafletP = null; throw e; });
+  return leafletP;
+}
+function routeLegs(P){
+  const p = park(), fit = P.steps.filter(x => x.fits), legs = [], stops = {};
+  let cur = S.loc[S.park] || p.lands[0];
+  fit.forEach((x, i) => {
+    if (!allLands().includes(x.r.land)) return;
+    (stops[x.r.land] = stops[x.r.land] || []).push(i+1);
+    if (x.r.land !== cur){ legs.push([cur].concat(legPoints(cur, x.r.land))); cur = x.r.land; }
+  });
+  return {legs, stops};
+}
+function useDrawing(){ tilesBlocked = true; if (lmap){ try { lmap.remove(); } catch(e){} lmap = null; } if (tab === "route") renderRoute(); }
+async function mountMap(P){
+  const box = $("mapBox"); if (!box || !P) return;
+  if (lmap){ try { lmap.remove(); } catch(e){} lmap = null; youMarker = null; }
+  const mode = mapMode();
+  if (mode === "draw"){ box.innerHTML = mapSvg(P); return; }
+  box.innerHTML = '<div id="lmap"></div>';
+  let Lf; try { Lf = await loadLeaflet(); } catch(e){ useDrawing(); return; }
+  const el = $("lmap"); if (!el || el._leaflet_id) return;
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const accent = css("--accent") || "#0B6E78", meCol = css("--me") || "#2A6FDB";
+  const p = park(), m = lmap = Lf.map(el, {zoomControl:true});
+  const tl = Lf.tileLayer(TILES[mode].url, {maxZoom:19, attribution:TILES[mode].attr}).addTo(m);
+  let ok = 0, bad = 0;
+  tl.on("tileload", () => ok++);
+  tl.on("tileerror", () => { bad++; if (!ok && bad >= 3) useDrawing(); });
+  if (lview && lview.park === S.park) m.setView(lview.c, lview.z);
+  else m.fitBounds(allLands().map(l => landPoint(S.park, l)), {padding:[30,30]});
+  m.on("moveend", () => { lview = {park:S.park, c:m.getCenter(), z:m.getZoom()}; });
+  const me = myPoint(), rl = routeLegs(P);
+  rl.legs.forEach((leg, i) => {
+    const ll = leg.map(l => landPoint(S.park, l)); if (i === 0 && me) ll[0] = me;
+    Lf.polyline(ll, i === 0 ? {color:accent, weight:6, opacity:.95} : {color:accent, weight:4, opacity:.7, dashArray:"8 9"}).addTo(m);
+  });
+  allLands().forEach(l => {
+    const st = rl.stops[l], txt = st ? (st.length > 3 ? st[0]+"–"+st[st.length-1] : st.join(",")) : "";
+    const html = '<div>'+(st ? '<b class="'+(st[0]===1?"first":"")+'">'+txt+'</b>' : '<i></i>')+'<span>'+esc(l)+'</span></div>';
+    const mk = Lf.marker(landPoint(S.park, l), {icon:Lf.divIcon({className:"qc-pin"+(pinEdit?" drag":""), html, iconSize:null}), draggable:pinEdit, keyboard:false}).addTo(m);
+    if (pinEdit) mk.on("dragend", () => { const q = mk.getLatLng(); (S.calib[S.park] = S.calib[S.park]||{})[l] = [q.lat, q.lng]; persist(); mountMap(lastPlan); });
+  });
+  const start = me || landPoint(S.park, S.loc[S.park] || p.lands[0]);
+  youMarker = Lf.circleMarker(start, {radius:9, color:"#fff", weight:3, fillColor:meCol, fillOpacity:1}).addTo(m).bindTooltip(me ? "You" : "Start", {permanent:true, direction:"top", offset:[0,-8]});
+}
+function refreshMap(){
+  if (!lastPlan || tab !== "route") return;
+  if (mapMode() === "draw"){ const m = $("mapBox"); if (m) m.innerHTML = mapSvg(lastPlan); return; }
+  const me = myPoint();
+  if (youMarker && me){ youMarker.setLatLng(me); youMarker.setTooltipContent("You"); }
+}
+
+function setTab(t){
+  tab = t;
+  $("planView").hidden = t !== "plan"; $("routeView").hidden = t !== "route";
+  $("cta").hidden = t !== "plan";
+  $("tabPlan").setAttribute("aria-pressed", String(t==="plan")); $("tabRoute").setAttribute("aria-pressed", String(t==="route"));
+  if (t === "route") buildRoute();
+  window.scrollTo(0,0);
+}
+function renderAll(){ renderParkControls(); renderStatus(); renderRides(); if (tab==="route") buildRoute(); }
+
+/* ---------- Events ---------- */
+$("loc").onchange = e => {
+  const v = e.target.value; S.loc[S.park] = v; persist();
+  if (geoId != null){
+    manualUntil = Date.now() + 3*60000;
+    if (lastFix && Date.now()-lastFix.at < 120000 && lastFix.acc <= 60 && meters(lastFix.pt, GEO[S.park].center) < 1500){
+      (S.calib[S.park] = S.calib[S.park] || {})[v] = lastFix.pt; persist();
+      gpsLine("Saved this spot as "+v+". Location will use it from now on.");
+    }
+  }
+};
+$("endTime").onchange = e => { S.end[K()] = e.target.value; persist(); };
+$("eventToggle").onclick = () => { S.event[S.park] = !S.event[S.park]; persist(); renderAll(); refreshLive(); };
+const DUR = {house:5, zone:10, show:25, ride:5}, KIND = {house:"Haunted house", zone:"Scare zone", show:"Show", ride:"Ride"};
+$("addKind").onchange = () => { $("addDur").placeholder = DUR[$("addKind").value]; $("addWait").disabled = $("addKind").value === "zone"; };
+$("addBtn").onclick = () => {
+  const name = $("addName").value.trim();
+  if (!name){ $("addMsg").textContent = "Type a name first."; return; }
+  const kind = $("addKind").value, dur = Number($("addDur").value) || DUR[kind];
+  const wait = $("addWait").value === "" ? null : Number($("addWait").value);
+  const item = {id:"c_"+Date.now().toString(36), name, land:$("addLand").value, dur, kw:[norm(name)], note:KIND[kind]+" · added by you",
+    custom:true, event:eventOn(), show:kind==="show", zone:kind==="zone", house:kind==="house", fixedWait: kind==="zone" ? 0 : kind==="show" ? 15 : null, peak:30};
+  if (item.fixedWait == null){
+    item.peak = Math.max(5, (wait != null ? wait : (eventOn() ? 75 : 40)) / (S.crowd * curve(nowT())));
+    if (wait != null){ const o = S.overrides[S.park] = S.overrides[S.park]||{}; o[item.id] = {wait, at:Date.now()}; }
+  }
+  (S.custom[S.park] = S.custom[S.park] || []).push(item);
+  (S.sel[K()] = S.sel[K()] || []).push(item.id);
+  persist();
+  $("addName").value = ""; $("addWait").value = ""; $("addDur").value = "";
+  $("addMsg").textContent = "Added "+name+".";
+  renderRides();
+};
+$("startTime").onchange = e => { S.start = e.target.value; persist(); };
+$("startSeg").onclick = e => { const b = e.target.closest("button"); if (!b) return; S.startMode = b.dataset.start; persist(); renderParkControls(); };
+$("paceSeg").onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  S.pace = Object.assign({speed:0, minutes:0}, S.pace, {mode:b.dataset.pace}); persist();
+  if (b.dataset.pace === "auto" && geoId == null){ S.gps = true; persist(); startGPS(); }
+  renderPace();
+};
+$("crowdSeg").onclick = e => { const b = e.target.closest("button"); if (!b) return; S.crowd = Number(b.dataset.crowd); persist(); renderParkControls(); renderRides(); };
+$("selAll").onclick = () => { S.sel[K()] = allRides().map(r=>r.id); persist(); renderRides(); };
+$("selNone").onclick = () => { S.sel[K()] = []; persist(); renderRides(); };
+$("resetDay").onclick = () => { S.done[K()] = {}; persist(); renderRides(); };
+$("rideList").addEventListener("change", e => {
+  const aid = e.target.dataset.area;
+  if (aid){
+    const c = (S.custom[S.park]||[]).find(x => x.id === aid);
+    if (c) c.land = e.target.value; else (S.extraLand[S.park] = S.extraLand[S.park]||{})[aid] = e.target.value;
+    persist(); renderRides(); return;
+  }
+  const id = e.target.dataset.sel; if (!id) return;
+  const sel = S.sel[K()] = (S.sel[K()]||[]).filter(x => x !== id);
+  if (e.target.checked) sel.push(id);
+  persist();
+});
+$("rideList").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.remove){
+    S.custom[S.park] = (S.custom[S.park]||[]).filter(x => x.id !== b.dataset.remove);
+    S.sel[K()] = (S.sel[K()]||[]).filter(x => x !== b.dataset.remove); persist(); renderRides(); return;
+  }
+  if (b.dataset.must){ const m = S.must[K()] = S.must[K()]||{}; m[b.dataset.must] = !m[b.dataset.must]; persist(); renderRides(); }
+  else if (b.dataset.edit){ editing = editing === b.dataset.edit ? null : b.dataset.edit; renderRides(); }
+  else if (b.dataset.savewait){
+    const id = b.dataset.savewait, v = Number($("ew_"+id).value);
+    if (Number.isFinite(v) && v >= 0){ const o = S.overrides[S.park] = S.overrides[S.park]||{}; o[id] = {wait:v, at:Date.now()}; persist(); }
+    editing = null; renderRides();
+  } else if (b.dataset.clearwait){ const o = S.overrides[S.park]||{}; delete o[b.dataset.clearwait]; persist(); editing = null; renderRides(); }
+});
+$("rideList").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.id && e.target.id.startsWith("ew_")){ const b = e.target.parentNode.querySelector("[data-savewait]"); if (b) b.click(); } });
+$("routeBody").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.map){ S.mapMode = b.dataset.map; pinEdit = false; persist(); renderRoute(); return; }
+  if (b.id === "pinEdit"){ pinEdit = !pinEdit; renderRoute(); return; }
+  if (b.id === "pinReset"){ delete S.calib[S.park]; persist(); renderRoute(); return; }
+  const id = b.dataset.done || b.dataset.skip; if (!id) return;
+  const r = allRides().find(x => x.id === id);
+  if (b.dataset.done){ const d = S.done[K()] = S.done[K()]||{}; d[id] = true; if (r && r.land !== "?") S.loc[S.park] = r.land; }
+  else { S.sel[K()] = (S.sel[K()]||[]).filter(x => x !== id); }
+  S.startMode = "now"; persist(); renderParkControls(); renderRides(); buildRoute();
+});
+$("buildBtn").onclick = () => setTab("route");
+$("tabPlan").onclick = () => setTab("plan");
+$("tabRoute").onclick = () => setTab("route");
+
+/* ---------- Location ---------- */
+let geoId = null, lastFix = null, manualUntil = 0;
+function meters(a, b){
+  const toR = x => x*Math.PI/180, dLat = toR(b[0]-a[0]), dLon = toR(b[1]-a[1]);
+  const h = Math.sin(dLat/2)**2 + Math.cos(toR(a[0]))*Math.cos(toR(b[0]))*Math.sin(dLon/2)**2;
+  return 2*6371000*Math.asin(Math.sqrt(h));
+}
+function gpsLine(t){ const el = $("gpsLine"); el.hidden = !t; el.textContent = t || ""; }
+function renderGpsBtn(){ const b = $("gpsBtn"); b.setAttribute("aria-pressed", String(geoId != null)); b.textContent = geoId != null ? "Location on" : "Use my location"; }
+function landPoint(pid, land){ return (S.calib[pid] && S.calib[pid][land]) || GEO[pid].lands[land]; }
+function onFix(pos){
+  const pt = [pos.coords.latitude, pos.coords.longitude], acc = Math.round(pos.coords.accuracy || 0);
+  lastFix = {pt, acc, at:Date.now()};
+  samplePace(pt, acc);
+  if (tab === "route") setTimeout(() => {
+    if (lastPlan && S.startMode === "now" && (!lastPlan.pt || meters(pt, lastPlan.pt) > 80)) buildRoute(); else refreshMap();
+  }, 0);
+  let bestP = null, bd = Infinity;
+  for (const k in GEO){ const d = meters(pt, GEO[k].center); if (d < bd){ bd = d; bestP = k; } }
+  if (bd > 1500){ gpsLine("You're about "+(bd/1609).toFixed(1)+" mi from the nearest park, so your location isn't changing the plan yet."); return; }
+  if (bestP !== S.park){ S.park = bestP; persist(); renderAll(); refreshLive(); }
+  let land = null, ld = Infinity;
+  for (const l of allLands()){ const d = meters(pt, landPoint(S.park, l)); if (d < ld){ ld = d; land = l; } }
+  if (Date.now() < manualUntil){ gpsLine("Using the area you picked. Location takes over again in a few minutes."); return; }
+  gpsLine("You're near "+land+" (GPS accurate to about "+acc+" m). Wrong area? Pick the right one and the app remembers this spot.");
+  if (land !== (S.loc[S.park] || PARKS[S.park].lands[0])){
+    S.loc[S.park] = land; persist(); $("loc").value = land;
+    if (tab === "route") buildRoute();
+  }
+}
+/* Measures walking speed from GPS: every 30-180 s window with good accuracy where you moved 20 m+
+   at a walking speed counts. Standing still (in line, on a ride) is skipped. Recent walking counts most. */
+let paceAnchor = null;
+function samplePace(pt, acc){
+  if (acc > 25) return;
+  const now = Date.now();
+  if (!paceAnchor){ paceAnchor = {pt, at:now}; return; }
+  const dt = (now - paceAnchor.at)/1000;
+  if (dt < 30) return;
+  const d = meters(paceAnchor.pt, pt), v = d / dt;
+  paceAnchor = {pt, at:now};
+  if (dt > 180 || d < 20 || v < 0.3 || v > 2.5) return;
+  const pc = S.pace = Object.assign({mode:"normal", speed:0, minutes:0}, S.pace);
+  const m = Math.min(pc.minutes, 60), dm = dt/60;
+  pc.speed = pc.speed ? (pc.speed*m + v*60*dm)/(m + dm) : v*60;
+  pc.minutes += dm; persist();
+  if ($("paceLine")) renderPace();
+}
+function onGeoErr(e){
+  if (e && e.code === 1){
+    stopGPS(); S.gps = false; persist();
+    gpsLine("Location isn't allowed here. In the installed app, tap Allow when your phone asks (or turn it on in Settings › Privacy › Location). Until then, pick your area from the list.");
+  } else gpsLine("Still looking for a GPS signal. Pick your area from the list in the meantime.");
+}
+function startGPS(){
+  if (!navigator.geolocation){ gpsLine("This browser can't share your location. Pick your area from the list."); return; }
+  gpsLine("Finding you…");
+  try { geoId = navigator.geolocation.watchPosition(onFix, onGeoErr, {enableHighAccuracy:true, maximumAge:15000, timeout:30000}); }
+  catch(err){ geoId = null; onGeoErr({code:1}); }
+  renderGpsBtn();
+}
+function stopGPS(){ if (geoId != null && navigator.geolocation) navigator.geolocation.clearWatch(geoId); geoId = null; renderGpsBtn(); }
+$("gpsBtn").onclick = () => {
+  if (geoId != null){ stopGPS(); S.gps = false; gpsLine(""); }
+  else { S.gps = true; startGPS(); }
+  persist();
+};
+
+renderAll();
+if (S.gps) startGPS();
+refreshLive();
+setInterval(() => { if (!document.hidden) refreshLive(); }, 5*60000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && live[S.park] && Date.now()-live[S.park].at > 5*60000) refreshLive(); });
+})();
+</script>
+
+<script>if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}</script>
+</body></html>

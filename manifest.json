@@ -1,0 +1,14 @@
+{
+  "name": "Queue Compass",
+  "short_name": "Queue Compass",
+  "description": "Plans the fastest ride order at Universal Orlando from live and typical wait times.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F3F6F5",
+  "theme_color": "#0B6E78",
+  "icons": [
+    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}
