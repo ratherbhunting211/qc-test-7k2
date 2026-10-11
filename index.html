@@ -1729,7 +1729,7 @@ function waitChip(r){
   const L = live[S.park], unlisted = L && !liveFailed && !L.rides[r.id] && !r.custom && !r.extra && !r.show;
   return '<button type="button" class="wait'+lvl(tw)+'" data-edit="'+r.id+'" aria-label="Enter posted wait"><b>'+tw+'</b><i>'+(unlisted ? 'not listed' : 'typical')+'</i></button>';
 }
-let editing = null;
+let editing = null, editTimes = null;
 function renderRides(){
   const p = park(), sel = S.sel[K()] || (S.sel[K()] = eventOn() ? [] : p.rides.filter(r=>!r.id.startsWith("hex")).map(r=>r.id));
   const must = S.must[K()] || {}, done = S.done[K()] || {}, lowP = (S.low || {})[K()] || {};
@@ -1746,10 +1746,13 @@ function renderRides(){
     const on = sel.includes(r.id), isDone = !!done[r.id];
     const Lf = live[S.park], unl = Lf && !liveFailed && !Lf.rides[r.id] && !r.custom && !r.extra && !r.show && !r.hhn;
     const sub = isDone ? "Done today" : unl ? "Not in Universal's live feed today, may be closed. Tap the wait sign to enter it." : (r.note || (r.show ? "" : r.dur+" min ride"));
-    const timesIn = eventOn() && r.show && !r.meal && hasOpens(r) ? '<label class="opens">Show times <input type="text" data-times="'+r.id+'" value="'+esc(fmtTimes(((S.showtimes||{})[S.park]||{})[r.id] || r.times || []))+'" placeholder="e.g. 7p, 8:30p, 10p" aria-label="Show times for '+esc(r.name)+'" style="min-width:150px"></label>' : '';
+    /* Shows: pick a time from a drop-down. "Edit times" opens the typed list, for when times change or get cancelled. */
     const stList = r.show && !r.meal ? showTimes(r) : [], pk = pickedAt(r);
-    const pickIn = stList.length ? '<label class="opens">See it at <select data-pick="'+r.id+'" aria-label="Which showtime for '+esc(r.name)+'"><option value="">First one I can make</option>'+stList.map(v => '<option value="'+hhmm(v)+'"'+(v===pk?' selected':'')+'>'+fmt(v)+'</option>').join("")+'</select></label>' : '';
-    const opensIn = timesIn || eventOn() && hasOpens(r) ? timesIn || '<label class="opens">Opens <input type="time" data-opens="'+r.id+'" value="'+esc(opensStr(r))+'" aria-label="Opening time for '+esc(r.name)+'"></label>' : '';
+    const canType = eventOn() && r.show && !r.meal && hasOpens(r);
+    const timesIn = canType && (editTimes === r.id || !stList.length) ? '<label class="opens">Show times <input type="text" data-times="'+r.id+'" value="'+esc(fmtTimes(((S.showtimes||{})[S.park]||{})[r.id] || r.times || []))+'" placeholder="e.g. 7p, 8:30p, 10p" aria-label="Show times for '+esc(r.name)+'" style="min-width:150px"></label>' : '';
+    const pickIn = stList.length ? '<label class="opens">Show time <select data-pick="'+r.id+'" aria-label="Which showtime for '+esc(r.name)+'"><option value="">Earliest</option>'+stList.map(v => '<option value="'+hhmm(v)+'"'+(v===pk?' selected':'')+'>'+fmt(v)+'</option>').join("")+'</select></label>'+
+      (canType ? '<button type="button" class="chipbtn lowbtn" data-edittimes="'+r.id+'">'+(editTimes === r.id ? 'Done editing' : 'Edit times')+'</button>' : '') : '';
+    const opensIn = stList.length ? timesIn : timesIn || eventOn() && hasOpens(r) ? timesIn || '<label class="opens">Opens <input type="time" data-opens="'+r.id+'" value="'+esc(opensStr(r))+'" aria-label="Opening time for '+esc(r.name)+'"></label>' : '';
     const areaSel = (r.custom || r.extra || r.hhn) ? '<select class="area" data-area="'+r.id+'" aria-label="Area for '+esc(r.name)+'">'+["?"].concat(allLands()).map(l => '<option value="'+esc(l)+'"'+(l===r.land?' selected':'')+'>'+(l==="?"?"Set its area…":esc(l))+'</option>').join("")+'</select>' : '';
     const rm = r.custom ? '<button type="button" class="chipbtn rm" data-remove="'+r.id+'">Remove</button>' : '';
     return '<div class="ride'+(isDone?" off":"")+'">'+
@@ -2202,6 +2205,7 @@ $("rideList").addEventListener("click", e => {
   }
   if (b.dataset.must){ const m = S.must[K()] = S.must[K()]||{}; m[b.dataset.must] = !m[b.dataset.must]; if (m[b.dataset.must] && S.low && S.low[K()]) delete S.low[K()][b.dataset.must]; persist(); renderRides(); }
   else if (b.dataset.low){ const l = (S.low = S.low || {})[K()] = S.low[K()] || {}, id = b.dataset.low; l[id] = !l[id]; if (l[id] && S.must[K()]) delete S.must[K()][id]; persist(); renderRides(); }
+  else if (b.dataset.edittimes){ editTimes = editTimes === b.dataset.edittimes ? null : b.dataset.edittimes; renderRides(); }
   else if (b.dataset.edit){ editing = editing === b.dataset.edit ? null : b.dataset.edit; renderRides(); }
   else if (b.dataset.savewait){
     const id = b.dataset.savewait, v = Number($("ew_"+id).value);
