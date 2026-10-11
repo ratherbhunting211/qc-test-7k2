@@ -1975,7 +1975,8 @@ $("tabRoute").onclick = () => setTab("route");
    falls back to the area-to-area model. */
 const REGION = {usf:"resort", ioa:"resort", epic:"epic"};
 const BBOX = {resort:[28.4650,-81.4790,28.4830,-81.4600], epic:[28.4150,-81.4750,28.4650,-81.4250]};
-const OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
+const OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter",
+                  "https://overpass.private.coffee/api/interpreter", "https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
 const osm = {}, osmState = {}; let osmError = "";                 // region -> hydrated graph; region -> "loading" | "failed" | "ready"
 const graphFor = pid => osm[REGION[pid]] || null;
 function osmQuery(b){
@@ -2143,20 +2144,27 @@ async function ensureOSM(pid){
   }
   osmState[region] = "loading";
   const q = "data=" + encodeURIComponent(osmQuery(BBOX[region]));
-  for (const url of OVERPASS){
+  // 1) the copy GitHub refreshes weekly and serves with the app; 2) public OpenStreetMap servers as backup
+  const sources = [{url:"osm-" + region + ".json"}].concat(OVERPASS.map(url => ({url, post:true})));
+  const why = [];
+  for (const src of sources){
     try {
-      const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), 70000);
-      const res = await fetch(url, {method:"POST", body:q, headers:{"Content-Type":"application/x-www-form-urlencoded"}, signal:ctl.signal});
+      const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), src.post ? 60000 : 30000);
+      const res = await fetch(src.url, src.post ? {method:"POST", body:q, headers:{"Content-Type":"application/x-www-form-urlencoded"}, signal:ctl.signal} : {signal:ctl.signal});
       clearTimeout(tm);
-      if (!res.ok) throw new Error(res.status);
+      if (!res.ok) throw new Error("error " + res.status);
       const g = osmCompact(await res.json());
-      if (g.edges.length < 50) throw new Error("OpenStreetMap returned too few walkways");
+      if (g.edges.length < 50) throw new Error("too few walkways");
       save("osm." + region, g);
       osm[region] = osmHydrate(g); osmState[region] = "ready"; osmMatchRides(region);
       if (REGION[S.park] === region){ if (tab === "route") buildRoute(); if (lastFix) onFix({coords:{latitude:lastFix.pt[0], longitude:lastFix.pt[1], accuracy:lastFix.acc}}); }
       return;
-    } catch(e){ osmError = e.name === "AbortError" ? "the map download took too long" : (e.message || "couldn't connect"); }
+    } catch(e){
+      const host = src.post ? new URL(src.url).hostname : "this app's site";
+      why.push(host + ": " + (e.name === "AbortError" ? "too slow" : /load failed|failed to fetch|networkerror/i.test(e.message) ? "no answer (busy or blocked)" : e.message));
+    }
   }
+  osmError = why.join("; ");
   osmState[region] = "failed";
   if (tab === "route" && REGION[S.park] === region) renderRoute();
 }
