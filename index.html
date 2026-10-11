@@ -951,6 +951,23 @@ svg.leaflet-image-layer.leaflet-interactive path {
       <div id="liveNote"></div>
       <details class="addbox" id="feedBox"><summary>Check what the live feed lists</summary><div id="feedList"></div></details>
       <div id="rideList" style="display:grid;gap:12px"></div>
+      <details class="addbox" id="mealBox"><summary>Dining reservations</summary>
+        <div class="addform">
+          <div id="mealList" style="display:grid;gap:8px"></div>
+          <div class="field"><label class="hint" for="mealName">Restaurant</label><input type="text" id="mealName" placeholder="e.g. Lombard's Seafood Grille"></div>
+          <div class="row2">
+            <div class="field"><label class="hint" for="mealTime">Reservation time</label><input type="time" id="mealTime" value="18:00"></div>
+            <div class="field"><label class="hint" for="mealDur">Allow for the meal (min)</label><input type="number" inputmode="numeric" min="15" max="240" id="mealDur" value="75"></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label class="hint" for="mealLand">Where</label><select id="mealLand"></select></div>
+            <div class="field" id="mealExtWrap" hidden><label class="hint" for="mealExt">Walk from the park gate (min)</label><input type="number" inputmode="numeric" min="0" max="60" id="mealExt" value="10"></div>
+          </div>
+          <div class="field"><label class="hint" for="mealEarly">Arrive this early (min)</label><input type="number" inputmode="numeric" min="0" max="60" id="mealEarly" value="10"></div>
+          <div class="tools" style="align-items:center"><button class="chipbtn" id="mealAdd" type="button">Add reservation</button><span class="hint" id="mealMsg" role="status"></span></div>
+          <p class="hint" style="margin:0">It becomes a fixed stop in your route: everything else is planned around it, with a Leave by time that includes the walk and a reminder when it's time to go.</p>
+        </div>
+      </details>
       <details class="addbox" id="addBox"><summary id="addSummary">Add something that isn't listed</summary>
         <div class="addform">
           <div class="field"><label class="hint" for="addName">Name</label><input type="text" id="addName" placeholder="Name from the event map or official app"></div>
@@ -1176,7 +1193,7 @@ const nowT = () => T(nowMin());
 function allRides(){
   const p = park(), L = live[S.park], el = S.extraLand[S.park] || {};
   const ex = ((L && L.extras) || []).map(r => Object.assign({}, r, {land: el[r.id] || "?"}));
-  const cu = (S.custom[S.park] || []).filter(c => !!c.event === eventOn());
+  const cu = (S.custom[S.park] || []).filter(c => c.meal || !!c.event === eventOn());
   const ev = eventOn() ? p.eventRides.map(r => Object.assign({}, r, {land: el[r.id] || r.land})) : [];
   return p.rides.concat(ev, ex, cu);
 }
@@ -1198,10 +1215,18 @@ function walk(from, to){ return Math.max(1, Math.round(walkBase(from, to) * pace
 const landOf = x => x && typeof x === "object" ? x.land : x;
 function posOf(x){
   if (x === HERE) return myPoint();
+  if (x && typeof x === "object" && x.extWalk != null) return null;
   if (x && typeof x === "object") return ridePoint(x) || (x.land && x.land !== "?" ? landPoint(S.park, x.land) : null);
   return x && x !== "?" ? landPoint(S.park, x) : null;
 }
 function walkBase(from, to){
+  // dining outside the park: walk to the park gate, then the extra minutes you entered
+  const ext = x => x && typeof x === "object" && x.extWalk != null;
+  if (ext(to) || ext(from)){
+    const gate = park().lands[0];
+    if (ext(to) && ext(from)) return Math.abs((to.extWalk || 0) - (from.extWalk || 0)) + 2;
+    return ext(to) ? walkBase(from, gate) + to.extWalk : walkBase(gate, to) + from.extWalk;
+  }
   const g = graphFor(S.park);
   if (g){   // real walkways: path distance at ~70 m/min
     const a = posOf(from), b = posOf(to);
@@ -1416,11 +1441,11 @@ function simulate(order, t0, loc0, now, deadline){
     const wk = walk(loc, r); t += wk;
     const times = showTimes(r);
     if (times.length){   // be there SHOW_EARLY (30) minutes before the next showtime you can make
-      const st = times.find(x => x - SHOW_EARLY >= t);
+      const E = (r.early != null ? r.early : SHOW_EARLY), st = times.find(x => x - E >= t);
       if (st == null){ steps.push({r, walk:wk, arrive:t, hold:0, wait:0, end:t, fits:false, noShow:true}); t -= wk; continue; }
-      const arrive = t, hold = st - SHOW_EARLY - t; t = st + r.dur;
+      const arrive = t, hold = st - E - t; t = st + r.dur;
       const okShow = t <= deadline || (LINE_BY != null && st <= LINE_BY + 1);
-      steps.push({r, walk:wk, arrive, hold, showAt:st, wait:SHOW_EARLY, end:t, fits: okShow, afterClose: okShow && t > deadline});
+      steps.push({r, walk:wk, arrive, hold, showAt:st, wait:E, end:t, fits: okShow, afterClose: okShow && t > deadline});
       loc = r; continue;
     }
     const arrive = t, op = opensAt(r), hold = op != null && t < op ? op - t : 0; t += hold;
@@ -1447,13 +1472,13 @@ function optimize(rides, t0, loc0, now, deadline, must){
     while (left.length){
       const c = left.map(r => {
         const wk = walk(loc, r), times = showTimes(r);
-        if (times.length){ const st = times.find(x => x - SHOW_EARLY >= t + wk); return {r, cost: st == null ? 1e6 : (st - t) + r.dur - (must[r.id] ? 5 : 0)}; }
+        if (times.length){ const st = times.find(x => x - (r.early != null ? r.early : SHOW_EARLY) >= t + wk); return {r, cost: st == null ? 1e6 : (st - t) + r.dur - (must[r.id] ? 5 : 0)}; }
         const op = opensAt(r), at = Math.max(t + wk, op || 0); return {r, cost: (at - t) + waitAt(r, at, now) + r.dur - (must[r.id] ? 5 : 0)}; })
                     .sort((a,b) => a.cost-b.cost);
       const pick = c[rand ? Math.floor(Math.random()*Math.min(3,c.length)) : 0];
       out.push(pick.r); left.splice(left.indexOf(pick.r),1);
       const wk = walk(loc, pick.r), times = showTimes(pick.r);
-      if (times.length){ const st = times.find(x => x - SHOW_EARLY >= t + wk); if (st != null){ t = st + pick.r.dur; loc = pick.r; } continue; }
+      if (times.length){ const r = pick.r, st = times.find(x => x - (r.early != null ? r.early : SHOW_EARLY) >= t + wk); if (st != null){ t = st + pick.r.dur; loc = pick.r; } continue; }
       const op = opensAt(pick.r), at = Math.max(t + wk, op || 0); t = at + waitAt(pick.r, at, now) + pick.r.dur; loc = pick.r;
     }
     return out;
@@ -1616,9 +1641,17 @@ function renderParkControls(){
   $("startSeg").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.start === S.startMode)));
   $("startField").hidden = S.startMode !== "custom";
   $("crowdSeg").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(Number(b.dataset.crowd) === S.crowd)));
-  renderPace();
+  renderPace(); renderMeals();
 }
 const lvl = w => w < 30 ? " lo" : w < 60 ? " mid" : " hi";
+function renderMeals(){
+  const list = (S.custom[S.park] || []).filter(c => c.meal);
+  $("mealList").innerHTML = list.map(c => '<div class="feedrow" style="border:1px solid var(--line);border-radius:12px"><b>'+esc(c.name)+'</b><em>'+fmtShort(T(toMin(c.times[0])))+'</em><small>'+esc(c.extWalk != null ? 'Outside the park, '+c.extWalk+' min from the gate' : c.land)+' · '+c.dur+' min · arrive '+c.early+' min early <button class="chipbtn rm" type="button" data-remove="'+c.id+'">Remove</button></small></div>').join("");
+  const sel = $("mealLand"), cur = sel.value;
+  sel.innerHTML = allLands().map(l => '<option>'+esc(l)+'</option>').join("") + '<option value="__out">CityWalk / outside the park</option>';
+  if (cur) sel.value = cur;
+  $("mealExtWrap").hidden = sel.value !== "__out";
+}
 function renderPace(){
   const pc = S.pace || {};
   $("paceSeg").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.pace === (pc.mode || "normal"))));
@@ -1665,14 +1698,14 @@ function renderRides(){
     persist();
   }
   const groups = {};
-  for (const r of allRides()){ const l = r.land === "?" ? (r.hhn ? "Horror Nights · set each area" : "More from the live feed") : r.land; (groups[l] = groups[l] || []).push(r); }
+  for (const r of allRides()){ const l = r.meal ? "Dining reservations" : r.land === "?" ? (r.hhn ? "Horror Nights · set each area" : "More from the live feed") : r.land; (groups[l] = groups[l] || []).push(r); }
   renderHero();
-  const order = ["Horror Nights · set each area"].concat(allLands(), ["More from the live feed"]).filter(l => groups[l]);
+  const order = ["Dining reservations", "Horror Nights · set each area"].concat(allLands(), ["More from the live feed"]).filter(l => groups[l]);
   $("rideList").innerHTML = order.map(l => '<div class="land"><div class="lh">'+esc(l)+'</div>' + groups[l].map(r => {
     const on = sel.includes(r.id), isDone = !!done[r.id];
     const Lf = live[S.park], unl = Lf && !liveFailed && !Lf.rides[r.id] && !r.custom && !r.extra && !r.show && !r.hhn;
     const sub = isDone ? "Done today" : unl ? "Not in Universal's live feed today, may be closed. Tap the wait sign to enter it." : (r.note || (r.show ? "" : r.dur+" min ride"));
-    const timesIn = eventOn() && r.show && hasOpens(r) ? '<label class="opens">Show times <input type="text" data-times="'+r.id+'" value="'+esc(fmtTimes(((S.showtimes||{})[S.park]||{})[r.id] || r.times || []))+'" placeholder="e.g. 7p, 8:30p, 10p" aria-label="Show times for '+esc(r.name)+'" style="min-width:150px"></label>' : '';
+    const timesIn = eventOn() && r.show && !r.meal && hasOpens(r) ? '<label class="opens">Show times <input type="text" data-times="'+r.id+'" value="'+esc(fmtTimes(((S.showtimes||{})[S.park]||{})[r.id] || r.times || []))+'" placeholder="e.g. 7p, 8:30p, 10p" aria-label="Show times for '+esc(r.name)+'" style="min-width:150px"></label>' : '';
     const opensIn = timesIn || eventOn() && hasOpens(r) ? timesIn || '<label class="opens">Opens <input type="time" data-opens="'+r.id+'" value="'+esc(opensStr(r))+'" aria-label="Opening time for '+esc(r.name)+'"></label>' : '';
     const areaSel = (r.custom || r.extra || r.hhn) ? '<select class="area" data-area="'+r.id+'" aria-label="Area for '+esc(r.name)+'">'+["?"].concat(allLands()).map(l => '<option value="'+esc(l)+'"'+(l===r.land?' selected':'')+'>'+(l==="?"?"Set its area…":esc(l))+'</option>').join("")+'</select>' : '';
     const rm = r.custom ? '<button type="button" class="chipbtn rm" data-remove="'+r.id+'">Remove</button>' : '';
@@ -1711,9 +1744,9 @@ function renderRoute(){
     return '<li class="step'+(i===0&&!isLate?" next":"")+'"><div class="when">'+fmtShort(s.arrive).replace(/([ap])$/,'<small>$1m</small>')+'</div><div class="card">'+
       '<h3>'+esc(s.r.name)+'</h3>'+
       '<div class="meta"><span>'+esc(s.r.land==="?"?"Location unknown":s.r.land)+'</span>'+(must[s.r.id]?'<span class="pill must">Must-do</span>':'')+(lowR[s.r.id]?'<span class="pill">If time</span>':'')+src+'</div>'+
-      '<div class="meta"><span>Walk <b>'+s.walk+'</b> min'+(i===0 && !isLate && P.fromHere ? ' from you' : '')+'</span><span>'+(s.r.zone?'No line':s.r.show?'Arrive early <b>'+SHOW_EARLY+'</b> min':'Wait <b>~'+round5(s.wait)+'</b> min')+'</span><span>'+(s.r.zone?'Walk-through':s.r.show?'Show':(s.r.house||(s.r.extra&&eventOn()))?'Inside':'Ride')+' <b>'+s.r.dur+'</b> min</span><span>Out by <b>'+fmtShort(s.end)+'</b></span></div>'+
+      '<div class="meta"><span>Walk <b>'+s.walk+'</b> min'+(i===0 && !isLate && P.fromHere ? ' from you' : '')+'</span><span>'+(s.r.zone?'No line':s.r.show?'Arrive early <b>'+earlyOf(s.r)+'</b> min':'Wait <b>~'+round5(s.wait)+'</b> min')+'</span><span>'+(s.r.zone?'Walk-through':s.r.meal?'Meal':s.r.show?'Show':(s.r.house||(s.r.extra&&eventOn()))?'Inside':'Ride')+' <b>'+s.r.dur+'</b> min</span><span>Out by <b>'+fmtShort(s.end)+'</b></span></div>'+
       (s.afterClose && !s.showAt ? '<div class="meta"><span class="pill live">In line before close</span><span>Get in line by <b>'+fmtShort(LINE_BY)+'</b>; you\'ll ride after closing</span></div>' : '')+
-      (s.showAt ? '<div class="meta"><span class="pill must">Show '+fmtShort(s.showAt)+'</span><span>Be there by <b>'+fmtShort(s.showAt-SHOW_EARLY)+'</b> for a good spot</span><span>Leave by <b>'+fmtShort(leaveAt(s))+'</b></span></div>'+
+      (s.showAt ? '<div class="meta"><span class="pill must">'+(s.r.meal ? 'Reservation ' : 'Show ')+fmtShort(s.showAt)+'</span><span>Be there by <b>'+fmtShort(s.showAt-earlyOf(s.r))+'</b>'+(s.r.meal ? '' : ' for a good spot')+'</span><span>Leave by <b>'+fmtShort(leaveAt(s))+'</b></span></div>'+
         (isLate || /claude|anthropic/i.test(location.hostname) ? '' : '<div class="tools"><button class="chipbtn" type="button" data-ics="'+s.r.id+'" data-at="'+s.showAt+'" data-leave="'+leaveAt(s)+'">Add to calendar with reminder</button></div>') : '')+
       (s.noShow ? '<div class="meta"><span>No showtimes left that you can reach tonight</span></div>' : '')+
       (s.hold > 0 && !s.showAt ? '<div class="meta"><span class="pill must">Opens '+fmtShort(s.opens)+'</span><span>You\'ll be there <b>'+Math.round(s.hold)+'</b> min before it opens</span></div>' : '')+
@@ -1763,7 +1796,8 @@ function renderRoute(){
 /* ---------- Show reminders ----------
    Latest time to leave = be-there time minus the walk. The app alerts you then (while it's open or
    recently used), and a calendar event with an alarm can remind you even when it's closed. */
-function leaveAt(s){ return s.showAt - SHOW_EARLY - (s.walk || 0); }
+const earlyOf = r => r.early != null ? r.early : SHOW_EARLY;
+function leaveAt(s){ return s.showAt - earlyOf(s.r) - (s.walk || 0); }
 function alertsLine(){
   const P = lastPlan; if (!P || !P.steps.some(s => s.fits && s.showAt)) return "";
   if (!("Notification" in window)) return '<p class="hint" style="margin:0">Show reminders: the app will flash and buzz when it\'s time to leave. For a reminder even when the app is closed, use Add to calendar.</p>';
@@ -1793,7 +1827,7 @@ function checkShowAlerts(){
     const key = s.r.id + "@" + s.showAt, lv = leaveAt(s);
     if (sent[key] || now < lv - 0.5 || now > s.showAt) continue;
     sent[key] = 1; save("alerts", sent);
-    notify("Time to leave for " + s.r.name, "Show at " + fmt(s.showAt) + ". Be there by " + fmt(s.showAt - SHOW_EARLY) + " (" + Math.round(s.walk || 0) + " min walk).");
+    notify("Time to leave for " + s.r.name, (s.r.meal ? "Reservation at " : "Show at ") + fmt(s.showAt) + ". Be there by " + fmt(s.showAt - earlyOf(s.r)) + " (" + Math.round(s.walk || 0) + " min walk).");
   }
 }
 setInterval(() => { if (!document.hidden) checkShowAlerts(); }, 20000);
@@ -1809,7 +1843,7 @@ function addToCalendar(id, showAt, leave){
   const ics = ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Queue Compass//EN","BEGIN:VEVENT",
     "UID:qc-"+id+"-"+stamp(start)+"@queue-compass","DTSTAMP:"+stamp(new Date()),"DTSTART:"+stamp(start),"DTEND:"+stamp(end),
     "SUMMARY:"+r.name,"LOCATION:"+(r.land && r.land !== "?" ? r.land + ", " : "")+park().name,
-    "DESCRIPTION:Be there by "+fmt(showAt - SHOW_EARLY)+" for a good spot. Leave by "+fmt(leave)+".",
+    "DESCRIPTION:Be there by "+fmt(showAt - earlyOf(r))+". Leave by "+fmt(leave)+".",
     "BEGIN:VALARM","ACTION:DISPLAY","DESCRIPTION:Time to leave for "+r.name,"TRIGGER:-PT"+before+"M","END:VALARM",
     "END:VEVENT","END:VCALENDAR"].join("\r\n");
   const url = URL.createObjectURL(new Blob([ics], {type:"text/calendar"}));
@@ -2050,6 +2084,24 @@ $("addBtn").onclick = () => {
 };
 $("startTime").onchange = e => { S.start = e.target.value; persist(); };
 $("startSeg").onclick = e => { const b = e.target.closest("button"); if (!b) return; S.startMode = b.dataset.start; persist(); renderParkControls(); };
+$("mealLand").onchange = () => { $("mealExtWrap").hidden = $("mealLand").value !== "__out"; };
+$("mealList").addEventListener("click", e => {
+  const b = e.target.closest("[data-remove]"); if (!b) return;
+  S.custom[S.park] = (S.custom[S.park]||[]).filter(x => x.id !== b.dataset.remove);
+  for (const k in S.sel) S.sel[k] = (S.sel[k]||[]).filter(x => x !== b.dataset.remove);
+  persist(); renderMeals(); renderRides();
+});
+$("mealAdd").onclick = () => {
+  const name = $("mealName").value.trim(), time = $("mealTime").value;
+  if (!name || !time){ $("mealMsg").textContent = "Add the restaurant and time first."; return; }
+  const out = $("mealLand").value === "__out", id = "m_" + Date.now().toString(36);
+  const item = {id, name, land: out ? "?" : $("mealLand").value, dur: Number($("mealDur").value) || 75, early: Math.max(0, Number($("mealEarly").value) || 0),
+    extWalk: out ? (Number($("mealExt").value) || 0) : null, kw:[norm(name)], note:"Dining reservation", custom:true, meal:true, show:true, fixedWait:0, times:[time], peak:0};
+  (S.custom[S.park] = S.custom[S.park] || []).push(item);
+  for (const k of [S.park, S.park + "_hhn"]){ (S.sel[k] = S.sel[k] || []).push(id); (S.must[k] = S.must[k] || {})[id] = true; }
+  if (S.plan) S.plan = null;          // a fixed-time stop: build a fresh plan around it
+  persist(); $("mealName").value = ""; $("mealMsg").textContent = "Added. Your route is planned around it."; renderMeals(); renderRides();
+};
 $("paceSeg").onclick = e => {
   const b = e.target.closest("button"); if (!b) return;
   S.pace = Object.assign({speed:0, minutes:0}, S.pace, {mode:b.dataset.pace}); persist();
