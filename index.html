@@ -1159,7 +1159,7 @@ function save(k, v){ try { localStorage.setItem("qc."+k, JSON.stringify(v)); } c
 const S = Object.assign({
   park: "usf", loc: {}, startMode: "now", start: "09:00", end: {}, crowd: 1,
   sel: {}, must: {}, done: {}, overrides: {},
-  event: {}, custom: {}, extraLand: {}, calib: {}, seen: {}, gps: false, plan: null, low: {}, inLine: null, pace: {mode:"normal", speed:0, minutes:0}, evHours: {}, opens: {}, showtimes: {}, pick: {}, adj: {}
+  event: {}, custom: {}, extraLand: {}, calib: {}, seen: {}, gps: false, plan: null, low: {}, inLine: null, pace: {mode:"normal", speed:0, minutes:0}, evHours: {}, opens: {}, showtimes: {}, pick: {}, adj: {}, aqa: {}
 }, load("state", {}));
 let samples = load("samples", {});          // park -> ride -> hour -> [sum,count]
 const live = {};                             // park -> {rides:{id:{wait,status}}, extras:[], at}
@@ -1171,7 +1171,7 @@ if (!S.evHours.usf){   // your Horror Nights ticket: 2 PM to 2 AM
   if (!S.end.usf_hhn || S.end.usf_hhn === "01:00") S.end.usf_hhn = "02:00";
 }
 function persist(){ save("state", {park:S.park,loc:S.loc,startMode:S.startMode,start:S.start,end:S.end,crowd:S.crowd,sel:S.sel,must:S.must,done:S.done,overrides:S.overrides,
-  event:S.event,plan:S.plan,low:S.low,inLine:S.inLine,evHours:S.evHours,opens:S.opens,showtimes:S.showtimes,pick:S.pick,adj:S.adj,custom:S.custom,pace:S.pace,mapMode:S.mapMode,extraLand:S.extraLand,calib:S.calib,seen:S.seen,gps:S.gps}); }
+  event:S.event,plan:S.plan,low:S.low,inLine:S.inLine,evHours:S.evHours,opens:S.opens,showtimes:S.showtimes,pick:S.pick,adj:S.adj,aqa:S.aqa,custom:S.custom,pace:S.pace,mapMode:S.mapMode,extraLand:S.extraLand,calib:S.calib,seen:S.seen,gps:S.gps}); }
 
 /* ---------- Helpers ---------- */
 const $ = id => document.getElementById(id);
@@ -1289,6 +1289,7 @@ function liveAdj(id){
 }
 function waitAt(r, t, now){
   if (r.fixedWait != null) return r.fixedWait;
+  if (aqaOf(r.id)) return AQA_WAIT;
   const h = histWait(r, t);
   const c = currentWait(r);
   if (!c || c.wait == null) return h;
@@ -1330,7 +1331,13 @@ function parseTimes(str){
   return [...new Set(out)].sort((a, b) => T(toMin(a)) - T(toMin(b)));
 }
 const fmtTimes = list => list.map(x => fmtShort(T(toMin(x)))).join(", ");
-function opensAt(r){ const o = hasOpens(r) && opensStr(r); return o ? T(toMin(o)) : null; }
+function opensAt(r){ const o = hasOpens(r) && opensStr(r), base = o ? T(toMin(o)) : null, a = aqaAt(r); return a != null ? Math.max(a, base == null ? -1e9 : base) : base; }
+/* Attraction Queue Accommodation: you hold a return time instead of standing in line. The ride counts as
+   in line now (a must-do, never dropped); you can do other stops until the return time, then it's a short
+   merge wait plus the ride. */
+const AQA_WAIT = 5;
+function aqaOf(id){ const a = ((S.aqa || {})[K()] || {})[id]; return a && a.day === new Date().toDateString() ? a : null; }
+function aqaAt(r){ const a = aqaOf(r.id); return a && a.ret ? T(toMin(a.ret)) : null; }
 function unavailable(r){
   const c = currentWait(r);
   if (!c || !c.status) return null;
@@ -1768,6 +1775,7 @@ function waitChip(r){
   const c = currentWait(r), now = nowT();
   const nextShow = showTimes(r).find(x => x >= now);
   if (nextShow != null) return '<span class="wait"><b>'+fmtShort(nextShow).replace(/[ap]$/,'')+'</b><i>next show</i></span>';
+  if (aqaOf(r.id) && aqaAt(r) != null) return '<span class="wait live"><b>'+fmtShort(aqaAt(r)).replace(/[ap]$/,'')+'</b><i>return</i></span>';
   if (r.show && showTimes(r).length) return '<span class="wait down"><b>—</b><i>done</i></span>';
   if (c && c.status === "CLOSED" && opensAt(r) != null && opensAt(r) > now) return '<span class="wait"><b>'+fmtShort(opensAt(r)).replace(/[ap]$/,'')+'</b><i>opens '+(fmtShort(opensAt(r)).endsWith('a')?'am':'pm')+'</i></span>';
   if (c && c.status) return '<button type="button" class="wait down" data-edit="'+r.id+'" aria-label="Edit wait"><b>—</b><i>'+(c.status==="DOWN"?"Down":"Closed")+'</i></button>';
@@ -1808,7 +1816,9 @@ function renderRides(){
     return '<div class="ride'+(isDone?" off":"")+'">'+
       '<input type="checkbox" id="c_'+r.id+'" data-sel="'+r.id+'"'+(on?" checked":"")+'>'+
       '<div class="rname"><label for="c_'+r.id+'"><span>'+esc(r.name)+'</span></label><small>'+esc(sub)+'</small>'+opensIn+pickIn+areaSel+rm+
-        (!isDone && canLine(r) ? '<button type="button" class="chipbtn lowbtn" data-inlinenow="'+r.id+'" aria-pressed="'+(inLineId === r.id)+'">'+(inLineId === r.id ? 'In line now' : 'I\'m in line')+'</button>' : '')+
+        (!isDone && canLine(r) ? '<button type="button" class="chipbtn lowbtn" data-aqa="'+r.id+'" aria-pressed="'+(!!aqaOf(r.id))+'">'+(aqaOf(r.id) ? '✓ Queue accommodation' : 'Queue accommodation')+'</button>'+
+          (aqaOf(r.id) ? '<label class="opens">Return time <input type="time" data-aqatime="'+r.id+'" value="'+esc(aqaOf(r.id).ret || "")+'" aria-label="Return time for '+esc(r.name)+'"></label>' : '') : '')+
+        (!isDone && canLine(r) && !aqaOf(r.id) ? '<button type="button" class="chipbtn lowbtn" data-inlinenow="'+r.id+'" aria-pressed="'+(inLineId === r.id)+'">'+(inLineId === r.id ? 'In line now' : 'I\'m in line')+'</button>' : '')+
         (on && !isDone ? '<button type="button" class="chipbtn lowbtn" data-low="'+r.id+'" aria-pressed="'+(!!lowP[r.id])+'">'+(lowP[r.id] ? '↓ If time' : 'If time?')+'</button>' : '')+'</div>'+
       '<button type="button" class="star" data-must="'+r.id+'" aria-pressed="'+(!!must[r.id])+'" aria-label="Must-do">★</button>'+
       waitChip(r)+
@@ -1820,7 +1830,7 @@ function renderRides(){
 /* Shows you pick count as must-dos (unless you mark them "If time"): like must-dos, they are never dropped. */
 function mustMap(key){
   const m = Object.assign({}, S.must[key] || {}), low = (S.low || {})[key] || {};
-  for (const r of allRides()) if (r.show && !r.meal && !low[r.id]) m[r.id] = true;
+  for (const r of allRides()) if ((r.show && !r.meal && !low[r.id]) || aqaOf(r.id)) m[r.id] = true;
   return m;
 }
 const canLine = r => !r.show && !r.zone && !r.meal;
@@ -1870,7 +1880,8 @@ function renderRoute(){
       (s.noShow ? '<div class="meta"><span>No showtimes left that you can reach tonight</span></div>' : '')+
       (s.passed ? '<div class="meta"><span>'+(s.r.meal ? 'This reservation\'s time has passed. Tap Done if you\'ve eaten, or Remove it under Dining reservations.' : 'The '+fmtShort(s.showAt)+' show has started. Tap Done if you saw it, or pick another time for it on the Plan screen.')+'</span></div>' : '')+
       (s.lateBy > 0 ? '<div class="verdict no"><span>Running about '+s.lateBy+' min late for '+esc(s.r.name)+'. Leave now'+(s.r.meal ? ', or call the restaurant' : '')+'.</span></div>' : '')+
-      (s.hold > 0 && !s.showAt ? '<div class="meta"><span class="pill must">Opens '+fmtShort(s.opens)+'</span><span>You\'ll be there <b>'+Math.round(s.hold)+'</b> min before it opens</span></div>' : '')+
+      (aqaOf(s.r.id) ? '<div class="meta"><span class="pill live">Queue accommodation</span><span>Return time <b>'+fmtShort(aqaAt(s.r))+'</b> · you\'re holding your place, do other stops until then</span></div>' : '')+
+      (s.hold > 0 && !s.showAt ? '<div class="meta"><span class="pill must">'+(aqaOf(s.r.id) ? 'Return ' : 'Opens ')+fmtShort(s.opens)+'</span><span>You\'ll be there <b>'+Math.round(s.hold)+'</b> min '+(aqaOf(s.r.id) ? 'before your return time' : 'before it opens')+'</span></div>' : '')+
       (s.r.note && !s.r.show && !s.r.custom && !s.r.extra ? '<div class="hint">'+esc(s.r.note)+'</div>' : '')+
       (s.inLineNow ? '<div class="meta"><span class="pill live">In line</span><span>Since <b>'+fmtShort(s.arrive)+'</b> · expected off by <b>'+fmtShort(s.end)+'</b>'+(s.end > s.expEnd + 1 ? ' (running long)' : '')+'</span></div>' : '')+
       (s.askDown ? '<div class="verdict no" style="display:grid;gap:8px"><span>'+esc(s.r.name)+' is '+(s.downNow === "DOWN" ? 'temporarily down' : 'closed')+' while you\'re in line. Stay and wait, or leave and replan? Either way it stays on your list and comes back into your route when it reopens.</span><div class="actions"><button type="button" class="done" data-keepwait="'+s.r.id+'">Keep waiting</button><button type="button" data-leavedown="'+s.r.id+'">Leave line &amp; replan</button></div></div>' : '')+
@@ -2251,6 +2262,8 @@ $("resetDay").onclick = () => { S.done[K()] = {}; persist(); renderRides(); };
 $("rideList").addEventListener("change", e => {
   const tid = e.target.dataset.times;
   if (tid){ const list = parseTimes(e.target.value); ((S.showtimes = S.showtimes || {})[S.park] = S.showtimes[S.park] || {})[tid] = list; e.target.value = fmtTimes(list); persist(); renderRides(); return; }
+  const qid = e.target.dataset.aqatime;
+  if (qid){ const a = aqaOf(qid); if (a && e.target.value){ a.ret = e.target.value; S.plan = null; persist(); renderRides(); } return; }
   const pid = e.target.dataset.pick;
   if (pid){
     const pk = (S.pick = S.pick || {})[S.park] = S.pick[S.park] || {};
@@ -2276,6 +2289,18 @@ $("rideList").addEventListener("click", e => {
   if (b.dataset.remove){
     S.custom[S.park] = (S.custom[S.park]||[]).filter(x => x.id !== b.dataset.remove);
     S.sel[K()] = (S.sel[K()]||[]).filter(x => x !== b.dataset.remove); persist(); renderRides(); return;
+  }
+  if (b.dataset.aqa){
+    const id = b.dataset.aqa, k = K(), A = (S.aqa = S.aqa || {})[k] = S.aqa[k] || {};
+    if (aqaOf(id)) delete A[id];
+    else {
+      const r = allRides().find(x => x.id === id), now = nowT(), c = r && currentWait(r);
+      const w = c && c.wait != null ? c.wait : r ? waitAt(r, now, now) : 30;
+      A[id] = {ret: hhmm(Math.ceil((now + w) / 5) * 5), day: new Date().toDateString(), at: Date.now()};
+      const sl = S.sel[k] = S.sel[k] || []; if (!sl.includes(id)) sl.push(id);
+      if (S.inLine && S.inLine.id === id) S.inLine = null;
+    }
+    S.plan = null; persist(); renderRides(); return;
   }
   if (b.dataset.inlinenow){
     const id = b.dataset.inlinenow;
@@ -2316,6 +2341,7 @@ $("routeBody").addEventListener("click", e => {
   const id = b.dataset.done || b.dataset.skip; if (!id) return;
   if (S.inLine && S.inLine.id === id) S.inLine = null;
   const r = allRides().find(x => x.id === id);
+  if (S.aqa && S.aqa[K()]) delete S.aqa[K()][id];
   if (b.dataset.done){ const d = S.done[K()] = S.done[K()]||{}; d[id] = true; if (r && r.land !== "?") S.loc[S.park] = r.land; }
   else { S.sel[K()] = (S.sel[K()]||[]).filter(x => x !== id); }
   S.startMode = "now"; persist(); renderParkControls(); renderRides(); buildRoute(false, true);
