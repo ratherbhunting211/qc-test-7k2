@@ -1,0 +1,34 @@
+HTTP/2 200 
+date: Sun, 11 Oct 2026 16:46:04 GMT
+content-type: application/json; charset=utf-8
+access-control-allow-origin: *
+access-control-expose-headers: RateLimit-Limit,RateLimit-Policy,RateLimit-Remaining,RateLimit-Reset,RateLimit-History-Limit,RateLimit-History-Policy,RateLimit-History-Remaining,RateLimit-History-Reset,Retry-After
+cache-control: public, max-age=60, s-maxage=60
+content-security-policy: default-src 'self';style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com;script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com;font-src 'self' https://cdn.jsdelivr.net;connect-src 'self' https://unpkg.com https://cdn.jsdelivr.net;img-src 'self' data: https:;base-uri 'self';form-action 'self';frame-ancestors 'self';object-src 'none';script-src-attr 'none';upgrade-insecure-requests
+cross-origin-opener-policy: same-origin
+cross-origin-resource-policy: same-origin
+etag: W/"8887-7hH7ZONL9d4ZbVLNIAw+7ZDdGYc"
+nel: {"report_to":"heroku-nel","response_headers":["Via"],"max_age":3600,"success_fraction":0.01,"failure_fraction":0.1}
+origin-agent-cluster: ?1
+ratelimit-limit: 300
+ratelimit-policy: 300;w=60
+ratelimit-remaining: 299
+ratelimit-reset: 60
+referrer-policy: no-referrer
+report-to: {"group":"heroku-nel","endpoints":[{"url":"https://nel.heroku.com/reports?s=z150IjWcOxtiM8d4ZWeWdsTBcqXkr0qxkE3XHEgtTXA%3D\u0026sid=c4c9725f-1ab0-44d8-820f-430df2718e11\u0026ts=1791737164"}],"max_age":3600}
+reporting-endpoints: heroku-nel="https://nel.heroku.com/reports?s=z150IjWcOxtiM8d4ZWeWdsTBcqXkr0qxkE3XHEgtTXA%3D&sid=c4c9725f-1ab0-44d8-820f-430df2718e11&ts=1791737164"
+server: cloudflare
+strict-transport-security: max-age=2592000
+vary: Accept-Encoding
+via: 2.0 heroku-router
+x-content-type-options: nosniff
+x-dns-prefetch-control: off
+x-download-options: noopen
+x-frame-options: SAMEORIGIN
+x-permitted-cross-domain-policies: none
+x-request-id: 4f98cab4-c487-3d48-bee4-ae8311d486d4
+x-xss-protection: 0
+cf-cache-status: EXPIRED
+cf-ray: a48f56bc1a81e0b9-DTW
+alt-svc: h3=":443"; ma=86400
+
