@@ -1508,7 +1508,8 @@ function simulate(order, t0, loc0, now, deadline){
     let s1 = stepFor(r, t, loc);
     while (pending.length && !s1.skip){
       const m = pending[0];
-      if (aqaOf(m.r.id) ? t < m.at : s1.t + walk(r, m.r) <= m.at - earlyOf(m.r)) break;   // pass: return any time after, so finish the stop you're on first   // fits before dinner
+      // pass: you can return any time after, so a stop that starts before the return time goes first
+      if (aqaOf(m.r.id) ? s1.step.arrive + (s1.step.hold || 0) < m.at : s1.t + walk(r, m.r) <= m.at - earlyOf(m.r)) break;   // fits before dinner
       doMeal(pending.shift());
       s1 = stepFor(r, t, loc);
     }
@@ -1831,8 +1832,7 @@ function renderRides(){
       '<input type="checkbox" id="c_'+r.id+'" data-sel="'+r.id+'"'+(on?" checked":"")+'>'+
       '<div class="rname"><label for="c_'+r.id+'"><span>'+esc(r.name)+'</span></label><small>'+esc(sub)+'</small>'+opensIn+pickIn+areaSel+rm+
         (!isDone && canLine(r) ? '<button type="button" class="chipbtn lowbtn" data-aqa="'+r.id+'" aria-pressed="'+(!!aqaOf(r.id))+'">'+(aqaOf(r.id) ? '✓ Queue accommodation' : 'Queue accommodation')+'</button>'+
-          (aqaOf(r.id) ? '<label class="opens">Return time <input type="time" data-aqatime="'+r.id+'" value="'+esc(aqaOf(r.id).ret || "")+'" aria-label="Return time for '+esc(r.name)+'"></label>'+
-            '<span class="retadj">'+[-15,-5,5,15].map(d => '<button type="button" class="chipbtn lowbtn" data-retadj="'+r.id+'" data-d="'+d+'">'+(d > 0 ? '+' : '−')+Math.abs(d)+'</button>').join("")+'</span>' : '') : '')+
+          (aqaOf(r.id) ? returnBox(r) : '') : '')+
         (!isDone && canLine(r) && !aqaOf(r.id) ? '<button type="button" class="chipbtn lowbtn" data-inlinenow="'+r.id+'" aria-pressed="'+(inLineId === r.id)+'">'+(inLineId === r.id ? 'In line now' : 'I\'m in line')+'</button>' : '')+
         (on && !isDone ? '<button type="button" class="chipbtn lowbtn" data-low="'+r.id+'" aria-pressed="'+(!!lowP[r.id])+'">'+(lowP[r.id] ? '↓ If time' : 'If time?')+'</button>' : '')+'</div>'+
       '<button type="button" class="star" data-must="'+r.id+'" aria-pressed="'+(!!must[r.id])+'" aria-label="Must-do">★</button>'+
@@ -1859,7 +1859,11 @@ function markInLine(id){
   if (S.done[k]) delete S.done[k][id];
   S.plan = null; S.startMode = "now"; persist();
 }
+let routePending = false;
 function renderRoute(){
+  const ae = document.activeElement;
+  if (ae && ae.tagName === "INPUT" && $("routeBody").contains(ae)){ routePending = true; return; }
+  routePending = false;
   const P = lastPlan, body = $("routeBody");
   if (!P){ body.innerHTML = '<div class="empty"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.5 18H15a3 3 0 000-6H9a3 3 0 010-6h6.5"/></svg><span>Pick your rides on the Plan tab, then tap <b>Build my route</b>.</span></div>'; return; }
   const fit = P.steps.filter(s => s.fits), late = P.steps.filter(s => !s.fits && !s.passed), passed = P.steps.filter(s => s.passed);
@@ -1895,15 +1899,17 @@ function renderRoute(){
       (s.noShow ? '<div class="meta"><span>No showtimes left that you can reach tonight</span></div>' : '')+
       (s.passed ? '<div class="meta"><span>'+(s.r.meal ? 'This reservation\'s time has passed. Tap Done if you\'ve eaten, or Remove it under Dining reservations.' : 'The '+fmtShort(s.showAt)+' show has started. Tap Done if you saw it, or pick another time for it on the Plan screen.')+'</span></div>' : '')+
       (s.lateBy > 0 ? '<div class="verdict no"><span>Running about '+s.lateBy+' min late for '+esc(s.r.name)+'. Leave now'+(s.r.meal ? ', or call the restaurant' : '')+'.</span></div>' : '')+
-      (aqaOf(s.r.id) ? '<div class="meta"><span class="pill live">Queue accommodation</span><span>Return time <b>'+fmtShort(aqaAt(s.r))+'</b> · you\'re holding your place, do other stops until then</span></div>' : '')+
+      (aqaOf(s.r.id) ? '<div class="meta"><span class="pill live">Queue accommodation</span><span>Return time <b>'+fmtShort(aqaAt(s.r))+'</b> · you\'re holding your place, do other stops until then</span></div><div class="rname" style="display:grid;gap:4px">'+returnBox(s.r)+'</div>' : '')+
       (s.hold > 0 && !s.showAt ? '<div class="meta"><span class="pill must">'+(aqaOf(s.r.id) ? 'Return ' : 'Opens ')+fmtShort(s.opens)+'</span><span>You\'ll be there <b>'+Math.round(s.hold)+'</b> min '+(aqaOf(s.r.id) ? 'before your return time' : 'before it opens')+'</span></div>' : '')+
       (s.r.note && !s.r.show && !s.r.custom && !s.r.extra ? '<div class="hint">'+esc(s.r.note)+'</div>' : '')+
       (s.inLineNow ? '<div class="meta"><span class="pill live">In line</span><span>Since <b>'+fmtShort(s.arrive)+'</b> · expected off by <b>'+fmtShort(s.end)+'</b>'+(s.end > s.expEnd + 1 ? ' (running long)' : '')+'</span></div>' : '')+
       (s.askDown ? '<div class="verdict no" style="display:grid;gap:8px"><span>'+esc(s.r.name)+' is '+(s.downNow === "DOWN" ? 'temporarily down' : 'closed')+' while you\'re in line. Stay and wait, or leave and replan? Either way it stays on your list and comes back into your route when it reopens.</span><div class="actions"><button type="button" class="done" data-keepwait="'+s.r.id+'">Keep waiting</button><button type="button" data-leavedown="'+s.r.id+'">Leave line &amp; replan</button></div></div>' : '')+
       (s.inLineNow && s.downNow && !s.askDown ? '<div class="hint">Down right now. You chose to keep waiting.</div>' : '')+
       (isLate && !s.passed ? (canLine(s.r) ? '<div class="actions"><button type="button" data-inline="'+s.r.id+'">I\'m in line now</button></div>' : '') : s.inLineNow
-        ? '<div class="actions"><button type="button" class="done" data-done="'+s.r.id+'">Done ✓</button><button type="button" data-leftline="'+s.r.id+'">Left the line</button></div>'
-        : '<div class="actions">'+(canLine(s.r) ? '<button type="button" data-inline="'+s.r.id+'">I\'m in line now</button>' : '')+'<button type="button" class="done" data-done="'+s.r.id+'">Done ✓</button><button type="button" data-skip="'+s.r.id+'">Skip</button></div>')+
+        ? '<div class="actions"><button type="button" class="done" data-done="'+s.r.id+'">Done ✓</button><button type="button" data-leftline="'+s.r.id+'">Left the line</button></div>'+
+          '<div class="tools"><button type="button" class="chipbtn" data-topass="'+s.r.id+'">Using queue accommodation? Set return time</button></div>'
+        : '<div class="actions">'+(canLine(s.r) ? '<button type="button" data-inline="'+s.r.id+'">I\'m in line now</button>' : '')+'<button type="button" class="done" data-done="'+s.r.id+'">Done ✓</button><button type="button" data-skip="'+s.r.id+'">Skip</button></div>'+
+          (canLine(s.r) && !aqaOf(s.r.id) ? '<div class="tools"><button type="button" class="chipbtn" data-topass="'+s.r.id+'">Got a queue accommodation pass</button></div>' : ''))+
       '</div></li>';
   };
   const ch = P.change, nextFit = fit[0];
@@ -2306,20 +2312,12 @@ $("rideList").addEventListener("click", e => {
     S.sel[K()] = (S.sel[K()]||[]).filter(x => x !== b.dataset.remove); persist(); renderRides(); return;
   }
   if (b.dataset.retadj){
-    const a = aqaOf(b.dataset.retadj); if (!a) return;
-    a.ret = hhmm(toMin(a.ret || hhmm(nowT())) + Number(b.dataset.d)); persist(); renderRides(); if (tab === "route") buildRoute(); return;
+    adjustReturn(b.dataset.retadj, Number(b.dataset.d)); renderRides(); return;
   }
   if (b.dataset.aqa){
     const id = b.dataset.aqa, k = K(), A = (S.aqa = S.aqa || {})[k] = S.aqa[k] || {};
-    if (aqaOf(id)) delete A[id];
-    else {
-      const r = allRides().find(x => x.id === id), now = nowT(), c = r && currentWait(r);
-      const w = c && c.wait != null ? c.wait : r ? waitAt(r, now, now) : 30;
-      A[id] = {ret: hhmm(Math.ceil((now + w) / 5) * 5), day: new Date().toDateString(), at: Date.now()};
-      const sl = S.sel[k] = S.sel[k] || []; if (!sl.includes(id)) sl.push(id);
-      if (S.inLine && S.inLine.id === id) S.inLine = null;
-    }
-    persist(); renderRides(); return;   // your stop order stays as is; the pass slots in at its return time
+    if (aqaOf(id)){ delete A[id]; persist(); } else startPass(id);
+    renderRides(); return;   // your stop order stays as is; the pass slots in at its return time
   }
   if (b.dataset.inlinenow){
     const id = b.dataset.inlinenow;
@@ -2345,10 +2343,26 @@ $("rideList").addEventListener("click", e => {
   } else if (b.dataset.clearwait){ const o = S.overrides[S.park]||{}; delete o[b.dataset.clearwait]; if (S.adj && S.adj[K()]) delete S.adj[K()][b.dataset.clearwait]; persist(); editing = null; renderRides(); }
 });
 function saveReturn(id, v){
-  const a = aqaOf(id); if (!a || !/^\d{1,2}:\d{2}/.test(v || "")) return;
-  a.ret = v.slice(0, 5); persist();
-  if (tab === "route") buildRoute();
+  const a = aqaOf(id); if (!a || !/^\d{1,2}:\d{2}/.test(v || "")) return false;
+  a.ret = v.slice(0, 5); persist(); return true;
 }
+/* Turn on the queue pass for a ride. If you're already standing in its line, the return time starts as
+   when you got in line plus the wait you had then; otherwise now plus the current wait. */
+function startPass(id){
+  const k = K(), A = (S.aqa = S.aqa || {})[k] = S.aqa[k] || {};
+  const r = allRides().find(x => x.id === id); if (!r) return;
+  const now = nowT(), il = S.inLine && S.inLine.id === id && S.inLine.key === k ? S.inLine : null;
+  let ret;
+  if (il) ret = il.t + il.wait;
+  else { const c = currentWait(r); ret = now + (c && c.wait != null ? c.wait : waitAt(r, now, now)); }
+  A[id] = {ret: hhmm(Math.ceil(ret / 5) * 5), day: new Date().toDateString(), at: Date.now()};
+  const sl = S.sel[k] = S.sel[k] || []; if (!sl.includes(id)) sl.push(id);
+  if (il) S.inLine = null;
+  persist();
+}
+function adjustReturn(id, d){ const a = aqaOf(id); if (!a) return; a.ret = hhmm(toMin(a.ret || hhmm(nowT())) + d); persist(); }
+const returnBox = (r, where) => '<label class="opens">Return time <input type="time" data-aqatime="'+r.id+'" value="'+esc(aqaOf(r.id).ret || "")+'" aria-label="Return time for '+esc(r.name)+'"></label>'+
+  '<span class="retadj">'+[-15,-5,5,15].map(d => '<button type="button" class="chipbtn lowbtn" data-retadj="'+r.id+'" data-d="'+d+'">'+(d > 0 ? '+' : '−')+Math.abs(d)+'</button>').join("")+'</span>';
 $("rideList").addEventListener("input", e => { const id = e.target.dataset.aqatime; if (id) saveReturn(id, e.target.value); });
 $("rideList").addEventListener("focusout", () => setTimeout(() => { if (ridesPending) renderRides(); }, 50));
 $("rideList").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.id && e.target.id.startsWith("ew_")){ const b = e.target.parentNode.querySelector("[data-savewait]"); if (b) b.click(); } });
@@ -2358,6 +2372,8 @@ $("routeBody").addEventListener("click", e => {
   if (b.id === "pinEdit"){ pinEdit = !pinEdit; renderRoute(); return; }
   if (b.id === "osmReload"){ const rg = REGION[S.park]; delete osm[rg]; delete osmState[rg]; try { localStorage.removeItem("qc.osm." + rg); } catch(e){} ensureOSM(S.park); renderRoute(); return; }
   if (b.id === "pinReset"){ delete S.calib[S.park]; persist(); renderRoute(); return; }
+  if (b.dataset.topass){ startPass(b.dataset.topass); buildRoute(); return; }
+  if (b.dataset.retadj){ adjustReturn(b.dataset.retadj, Number(b.dataset.d)); buildRoute(); return; }
   if (b.dataset.inline){ markInLine(b.dataset.inline); renderRides(); buildRoute(false, true); window.scrollTo(0,0); return; }
   if (b.dataset.leftline){ S.inLine = null; persist(); buildRoute(); return; }
   if (b.dataset.keepwait){ if (S.inLine) S.inLine.keep = true; persist(); buildRoute(); return; }
@@ -2372,6 +2388,9 @@ $("routeBody").addEventListener("click", e => {
   else { S.sel[K()] = (S.sel[K()]||[]).filter(x => x !== id); }
   S.startMode = "now"; persist(); renderParkControls(); renderRides(); buildRoute(false, true);
 });
+$("routeBody").addEventListener("input", e => { const id = e.target.dataset.aqatime; if (id) saveReturn(id, e.target.value); });
+$("routeBody").addEventListener("change", e => { const id = e.target.dataset.aqatime; if (id){ saveReturn(id, e.target.value); e.target.blur(); buildRoute(); } });
+$("routeBody").addEventListener("focusout", () => setTimeout(() => { if (routePending) buildRoute(); }, 50));
 $("buildBtn").onclick = () => { if (S.plan && S.plan.key === K()) S.plan = null; setTab("route"); };
 $("tabPlan").onclick = () => setTab("plan");
 $("tabRoute").onclick = () => setTab("route");
