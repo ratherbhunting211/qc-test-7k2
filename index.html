@@ -1419,11 +1419,13 @@ function simulate(order, t0, loc0, now, deadline){
   }
   return steps;
 }
+/* Fit the most (must-dos count most), finish earliest, and among equals do things sooner and
+   spend less time standing around waiting for a show or opening. */
 function score(steps, must){
-  let s = 0, lastEnd = 0;
-  for (const st of steps){ if (st.fits){ s += must[st.r.id] ? 1000 : 1; lastEnd = st.end; } }
+  let s = 0, lastEnd = 0, sumEnds = 0, idle = 0;
+  for (const st of steps){ if (st.fits){ s += must[st.r.id] ? 1000 : 1; lastEnd = st.end; sumEnds += st.end; idle += st.hold || 0; } }
   const total = steps.length ? steps[steps.length-1].end : 0;
-  return s*1e6 - lastEnd*10 - total*0.01;
+  return s*1e6 - lastEnd*10 - idle*2 - sumEnds*0.05 - total*0.01;
 }
 function optimize(rides, t0, loc0, now, deadline, must){
   if (rides.length <= 1) return rides.slice();
@@ -1474,8 +1476,22 @@ function planOrder(rides, t0, loc0, now, deadline, must, low){
   const main = rides.filter(r => !low[r.id]), extra = rides.filter(r => low[r.id]);
   const o1 = optimize(main, t0, loc0, now, deadline, must);
   if (!extra.length) return o1;
-  const st = simulate(o1, t0, loc0, now, deadline), last = st[st.length-1];
-  return o1.concat(optimize(extra, last ? last.end : t0, o1.length ? o1[o1.length-1] : loc0, now, deadline, {}));
+  // an if-time item may fill an idle gap (e.g. before a show) if it delays none of the main stops
+  const base = simulate(o1, t0, loc0, now, deadline), mainEnd = new Map(base.map(x => [x.r.id, x]));
+  let cur = o1.slice(); const rest = [];
+  for (const r of extra){
+    let placed = false;
+    for (let i = 0; i < cur.length && !placed; i++){
+      const trial = cur.slice(0, i).concat([r], cur.slice(i)), sim = simulate(trial, t0, loc0, now, deadline);
+      const mine = sim.find(x => x.r === r);
+      const ok = mine.fits && sim.every(x => { const b = mainEnd.get(x.r.id); return !b || (x.end <= b.end + 0.5 && x.fits === b.fits); });
+      if (ok){ cur = trial; placed = true; }
+    }
+    if (!placed) rest.push(r);
+  }
+  if (!rest.length) return cur;
+  const st = simulate(cur, t0, loc0, now, deadline), last = st[st.length-1];
+  return cur.concat(optimize(rest, last ? last.end : t0, cur.length ? cur[cur.length-1] : loc0, now, deadline, {}));
 }
 function buildRoute(auto, reopt){
   const p = park(), now = nowT(), key = K();
@@ -1498,11 +1514,12 @@ function buildRoute(auto, reopt){
     const nextId = lockedIds.find(id => sel.includes(id) && !done[id]);
     const nextClosed = nextId && closed.find(r => r.id === nextId);
     if (nextClosed) alert = nextClosed.name + " is " + (unavailable(nextClosed) === "DOWN" ? "temporarily down" : "closed") + " right now, so it's set aside and your route carries on with the next stop. It slots back in if it reopens. Tap Replan if you'd like a fresh order.";
-    if (auto && order.length > 1){   // would a fresh plan be clearly better?
+    if (order.length > 1){   // would a fresh plan be clearly better? (checked every time the route is shown)
       const cur = simulate(order, st.t, loc, now, deadline), alt = simulate(planOrder(rides, st.t, loc, now, deadline, must, low), st.t, loc, now, deadline);
       const fits = x => x.filter(q => q.fits).length, endOf = x => { const f = x.filter(q => q.fits); return f.length ? f[f.length-1].end : 0; };
-      const moreFits = fits(alt) - fits(cur), saves = Math.round(endOf(cur) - endOf(alt));
-      if (moreFits > 0 || (moreFits === 0 && saves >= 15)) better = {moreFits, saves, at: Date.now()};
+      const idleOf = x => x.filter(q => q.fits).reduce((a, q) => a + (q.hold || 0), 0);
+      const moreFits = fits(alt) - fits(cur), saves = Math.round(endOf(cur) - endOf(alt)), lessIdle = Math.round(idleOf(cur) - idleOf(alt));
+      if (moreFits > 0 || (moreFits === 0 && (saves >= 15 || lessIdle >= 20))) better = {moreFits, saves, lessIdle, at: Date.now()};
     }
   } else {
     order = planOrder(rides, st.t, loc, now, deadline, must, low);
@@ -1678,7 +1695,7 @@ function renderRoute(){
   };
   const ch = P.change, nextFit = fit[0];
   const changeHtml = (P.alert ? '<div class="verdict no"><span>'+esc(P.alert)+'</span></div>' : '') +
-    (P.better && !P.alert ? '<div class="verdict upd"><b>A better order is available</b><span>Waits have changed. Replanning now would '+(P.better.moreFits > 0 ? 'fit '+P.better.moreFits+' more' : 'finish about '+P.better.saves+' min sooner')+'. Your current plan stays until you choose.</span><span><button class="chipbtn" type="button" id="replan2">Use the new order</button></span></div>' : '');
+    (P.better && !P.alert ? '<div class="verdict upd"><b>A better order is available</b><span>Waits have changed. Replanning now would '+(P.better.moreFits > 0 ? 'fit '+P.better.moreFits+' more' : P.better.saves >= 15 ? 'finish about '+P.better.saves+' min sooner' : 'cut about '+P.better.lessIdle+' min of standing around waiting')+'. Your current plan stays until you choose.</span><span><button class="chipbtn" type="button" id="replan2">Use the new order</button></span></div>' : '');
   const L = live[S.park];
   const autoLine = (L && !liveFailed)
     ? 'Your stop order is locked until you tap Done, Skip or Replan. Times still update with live waits (last check '+new Date(L.at).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})+').'
