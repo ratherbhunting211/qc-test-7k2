@@ -951,6 +951,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
       <p class="hint" style="margin:0">Tick what you want. ★ marks a must-do, so the route never drops it. Tap a wait sign to type the posted wait from the official app.</p>
       <div id="liveNote"></div>
       <details class="addbox" id="feedBox"><summary>Check what the live feed lists</summary><div id="feedList"></div></details>
+      <p class="hint" id="verLine" style="margin:10px 0 0">App version 46 · <button type="button" class="chipbtn lowbtn" id="checkUpdate">Check for update</button></p>
       <div id="rideList" style="display:grid;gap:12px"></div>
       <details class="addbox" id="mealBox"><summary>Dining reservations</summary>
         <div class="addform">
@@ -2391,6 +2392,12 @@ $("routeBody").addEventListener("click", e => {
 $("routeBody").addEventListener("input", e => { const id = e.target.dataset.aqatime; if (id) saveReturn(id, e.target.value); });
 $("routeBody").addEventListener("change", e => { const id = e.target.dataset.aqatime; if (id){ saveReturn(id, e.target.value); e.target.blur(); buildRoute(); } });
 $("routeBody").addEventListener("focusout", () => setTimeout(() => { if (routePending) buildRoute(); }, 50));
+$("checkUpdate").onclick = async () => {
+  $("checkUpdate").textContent = "Checking…";
+  try { const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration(); if (reg) await reg.update(); } catch(e){}
+  try { const k = await caches.keys(); await Promise.all(k.map(x => caches.delete(x))); } catch(e){}
+  location.reload();
+};
 $("buildBtn").onclick = () => { if (S.plan && S.plan.key === K()) S.plan = null; setTab("route"); };
 $("tabPlan").onclick = () => setTab("plan");
 $("tabRoute").onclick = () => setTab("route");
