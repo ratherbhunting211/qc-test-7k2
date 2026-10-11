@@ -1315,7 +1315,9 @@ function pickedAt(r){
   const v = T(toMin(p)); return showTimes(r).includes(v) ? v : null;
 }
 const hhmm = v => { const m = ((Math.round(v) % 1440) + 1440) % 1440; return String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0"); };
-const isAnchor = r => r.meal || pickedAt(r) != null;
+/* Queue pass rides slot into your current order at their return time, like a reservation; the rest of
+   your stops keep their order (only Replan or Build my route re-orders them). */
+const isAnchor = r => r.meal || pickedAt(r) != null || aqaAt(r) != null;
 function parseTimes(str){
   const out = [];
   for (const tok of String(str).split(/[,;\n]+/)){
@@ -1466,14 +1468,19 @@ function simulate(order, t0, loc0, now, deadline){
   /* Dining reservations are anchors, not stops that can be missed: before each stop, if doing it would
      make you late for the next reservation, go to dinner first. A reservation is only ever left out
      if its whole time is already over (shown as "time has passed", never as "won't fit"). */
-  const meals = order.filter(isAnchor).map(r => ({r, at: r.meal ? showTimes(r)[0] : pickedAt(r)})).filter(m => m.at != null).sort((x, y) => x.at - y.at);
+  const meals = order.filter(isAnchor).map(r => ({r, at: r.meal ? showTimes(r)[0] : aqaAt(r) != null ? aqaAt(r) : pickedAt(r)})).filter(m => m.at != null).sort((x, y) => x.at - y.at);
   const items = order.filter(r => !isAnchor(r));
   const pending = [];
   for (const m of meals){
-    if (m.at + (m.r.meal ? m.r.dur : 0) < t0) steps.push({r:m.r, walk:0, arrive:m.at, hold:0, wait:0, showAt:m.at, end:m.at + m.r.dur, fits:false, passed:true});
+    if (!aqaOf(m.r.id) && m.at + (m.r.meal ? m.r.dur : 0) < t0) steps.push({r:m.r, walk:0, arrive:m.at, hold:0, wait:0, showAt:m.at, end:m.at + m.r.dur, fits:false, passed:true});
     else pending.push(m);
   }
   const doMeal = m => {
+    if (aqaOf(m.r.id)){   // queue pass: go back any time from the return time on, then a short merge wait
+      const wk = walk(loc, m.r), arrive = t + wk, hold = Math.max(0, m.at - arrive), end = arrive + hold + AQA_WAIT + m.r.dur;
+      steps.push({r:m.r, walk:wk, arrive, hold, opens:m.at, wait:AQA_WAIT, end, fits:true, aqa:true});
+      t = end; loc = m.r; return;
+    }
     const wk = walk(loc, m.r), E = earlyOf(m.r), arrive = t + wk, due = m.at - E;
     const hold = Math.max(0, due - arrive), lateBy = Math.max(0, Math.round(arrive - due));
     const end = Math.max(m.at, arrive) + m.r.dur;
@@ -1500,7 +1507,7 @@ function simulate(order, t0, loc0, now, deadline){
     let s1 = stepFor(r, t, loc);
     while (pending.length && !s1.skip){
       const m = pending[0];
-      if (s1.t + walk(r, m.r) <= m.at - earlyOf(m.r)) break;   // fits before dinner
+      if (aqaOf(m.r.id) ? t < m.at : s1.t + walk(r, m.r) <= m.at - earlyOf(m.r)) break;   // pass: return any time after, so finish the stop you're on first   // fits before dinner
       doMeal(pending.shift());
       s1 = stepFor(r, t, loc);
     }
@@ -2263,7 +2270,7 @@ $("rideList").addEventListener("change", e => {
   const tid = e.target.dataset.times;
   if (tid){ const list = parseTimes(e.target.value); ((S.showtimes = S.showtimes || {})[S.park] = S.showtimes[S.park] || {})[tid] = list; e.target.value = fmtTimes(list); persist(); renderRides(); return; }
   const qid = e.target.dataset.aqatime;
-  if (qid){ const a = aqaOf(qid); if (a && e.target.value){ a.ret = e.target.value; S.plan = null; persist(); renderRides(); } return; }
+  if (qid){ const a = aqaOf(qid); if (a && e.target.value){ a.ret = e.target.value; persist(); renderRides(); } return; }
   const pid = e.target.dataset.pick;
   if (pid){
     const pk = (S.pick = S.pick || {})[S.park] = S.pick[S.park] || {};
@@ -2300,7 +2307,7 @@ $("rideList").addEventListener("click", e => {
       const sl = S.sel[k] = S.sel[k] || []; if (!sl.includes(id)) sl.push(id);
       if (S.inLine && S.inLine.id === id) S.inLine = null;
     }
-    S.plan = null; persist(); renderRides(); return;
+    persist(); renderRides(); return;   // your stop order stays as is; the pass slots in at its return time
   }
   if (b.dataset.inlinenow){
     const id = b.dataset.inlinenow;
