@@ -1006,6 +1006,9 @@ const PARKS = {
     eventOpens: {h_jack:"14:00", h_stranger:"14:00", h_hellraiser:"14:00", h_ozzy:"17:15", h_sinners:"17:15",
                  h_evildead:"17:45", h_cyber:"17:45", h_bloodengutz:"17:45", h_invasion:"18:00", h_madlands:"18:00"},
     eventOpensDefault: "18:30",
+    /* exact spots for event items, where known (from the official app map + OpenStreetMap):
+       Jack & Oddfellow is in the Universal Music Plaza Stage plaza, in front of the stage */
+    eventPts: {h_jack: [28.47522, -81.46862]},
     eventTimes: {s_nightmare:["20:00","21:30","23:00","00:30"],
                  s_hawkins:["21:00","21:45","22:30","23:15","00:00","00:45"]},   // scare zones and anything without a listed time
     eventRides: [
@@ -1013,7 +1016,7 @@ const PARKS = {
       ["h_evildead","Evil Dead Burn","Soundstages",90,5,["evildead"],"Haunted house · Access Path A or B"],
       ["h_madlands","MADLANDS: Caged Cannibals","Soundstages",75,5,["madlands","cagedcannibals"],"Haunted house · Access Path A or B"],
       ["h_ozzy","Ozzy Osbourne: Prince of Darkness","Soundstages",90,5,["ozzy","princeofdarkness"],"Haunted house · Access Path A or B"],
-      ["h_jack","Jack & Oddfellow: Chaos & Control","Production Central",85,5,["oddfellow","chaosandcontrol"],"Haunted house · by Music Plaza"],
+      ["h_jack","Jack & Oddfellow: Chaos & Control","Production Central",85,5,["oddfellow","chaosandcontrol"],"Haunted house · Universal Music Plaza Stage"],
       ["h_hellraiser","Hellraiser","World Expo",90,5,["hellraiser"],"Haunted house"],
       ["h_sinners","Sinners","World Expo",80,5,["sinners"],"Haunted house"],
       ["h_cyber","Cybergoria","San Francisco",75,5,["cybergoria"],"Haunted house"],
@@ -1096,7 +1099,7 @@ const PARKS = {
 };
 for (const id in PARKS) {
   PARKS[id].rides = PARKS[id].rides.map(r => ({id:r[0],name:r[1],land:r[2],peak:r[3],dur:r[4],kw:r[5],note:r[6]||"",show:!!r[7],fixedWait:r[7]?SHOW_EARLY:null}));
-  PARKS[id].eventRides = (PARKS[id].eventRides || []).map(r => ({id:r[0],name:r[1],land:r[2],peak:r[3],dur:r[4],kw:r[5],note:r[6],opens:(PARKS[id].eventOpens||{})[r[0]], times:(PARKS[id].eventTimes||{})[r[0]],
+  PARKS[id].eventRides = (PARKS[id].eventRides || []).map(r => ({id:r[0],name:r[1],land:r[2],peak:r[3],dur:r[4],kw:r[5],note:r[6],opens:(PARKS[id].eventOpens||{})[r[0]], pt:(PARKS[id].eventPts||{})[r[0]], times:(PARKS[id].eventTimes||{})[r[0]],
     hhn:true, house:!r[7], zone:r[7]==="zone", show:r[7]==="show", fixedWait:r[7]==="zone"?0:r[7]==="show"?SHOW_EARLY:null}));
 }
 
@@ -2378,6 +2381,7 @@ function osmMatchRides(region){
 }
 function ridePoint(r){
   if (!r) return null;
+  if (r.pt) return r.pt;
   const rp = osmRidePt[S.park] || {};
   if (rp[r.id]) return rp[r.id];
   if (r.extra || r.custom){       // live-feed or hand-added items: try a name match too
