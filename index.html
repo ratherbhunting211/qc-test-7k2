@@ -1165,10 +1165,25 @@ function paceFactor(){
   return PACE[pc.mode] || 1;
 }
 function walk(from, to){ return Math.max(1, Math.round(walkBase(from, to) * paceFactor())); }
+/* from/to: a land name, HERE (your GPS position) or a ride object */
+const landOf = x => x && typeof x === "object" ? x.land : x;
+function posOf(x){
+  if (x === HERE) return myPoint();
+  if (x && typeof x === "object") return ridePoint(x) || (x.land && x.land !== "?" ? landPoint(S.park, x.land) : null);
+  return x && x !== "?" ? landPoint(S.park, x) : null;
+}
 function walkBase(from, to){
+  const g = graphFor(S.park);
+  if (g){   // real walkways: path distance at ~70 m/min
+    const a = posOf(from), b = posOf(to);
+    if (a && b){ const d = osmDist(g, a, b); if (d != null) return Math.max(1, d / 70); }
+  }
+  return walkAreas(from === HERE ? HERE : landOf(from), landOf(to));
+}
+function walkAreas(from, to){
   if (from === HERE){   // first leg from your live GPS position: straight-line distance plus 35% for paths, at ~70 m/min
     const me = myPoint(), pt = to !== "?" && landPoint(S.park, to);
-    if (!me || !pt) return walkBase(S.loc[S.park] || park().lands[0], to);
+    if (!me || !pt) return walkAreas(S.loc[S.park] || park().lands[0], to);
     return Math.max(1, Math.round(meters(me, pt) * 1.35 / 70));
   }
   if (from === to) return 2;
@@ -1311,10 +1326,10 @@ function startTime(){
 function simulate(order, t0, loc0, now, deadline){
   let t = t0, loc = loc0; const steps = [];
   for (const r of order){
-    const wk = walk(loc, r.land); t += wk;
+    const wk = walk(loc, r); t += wk;
     const arrive = t; const w = waitAt(r, t, now); t += w + r.dur;
     steps.push({r, walk:wk, arrive, wait:w, end:t, fits: t <= deadline});
-    loc = r.land;
+    loc = r;
   }
   return steps;
 }
@@ -1330,11 +1345,11 @@ function optimize(rides, t0, loc0, now, deadline, must){
   const greedy = (rand) => {
     const left = rides.slice(), out = []; let t = t0, loc = loc0;
     while (left.length){
-      const c = left.map(r => { const wk = walk(loc, r.land); return {r, cost: wk + waitAt(r, t+wk, now) + r.dur - (must[r.id] ? 5 : 0)}; })
+      const c = left.map(r => { const wk = walk(loc, r); return {r, cost: wk + waitAt(r, t+wk, now) + r.dur - (must[r.id] ? 5 : 0)}; })
                     .sort((a,b) => a.cost-b.cost);
       const pick = c[rand ? Math.floor(Math.random()*Math.min(3,c.length)) : 0];
       out.push(pick.r); left.splice(left.indexOf(pick.r),1);
-      const wk = walk(loc, pick.r.land); t += wk + waitAt(pick.r, t+wk, now) + pick.r.dur; loc = pick.r.land;
+      const wk = walk(loc, pick.r); t += wk + waitAt(pick.r, t+wk, now) + pick.r.dur; loc = pick.r;
     }
     return out;
   };
@@ -1429,7 +1444,7 @@ function renderParkControls(){
   document.documentElement.classList.toggle("hhn", eventOn());
   const tc = document.querySelector('meta[name="theme-color"]'); if (tc) tc.setAttribute("content", eventOn() ? "#2A0F4A" : "#0B4566");
   renderHero();
-  seg.querySelectorAll("button").forEach(b => b.onclick = () => { S.park = b.dataset.park; persist(); renderAll(); if (!live[S.park]) refreshLive(); });
+  seg.querySelectorAll("button").forEach(b => b.onclick = () => { S.park = b.dataset.park; parkPickedAt = Date.now(); save("parkPickedAt", parkPickedAt); persist(); renderAll(); ensureOSM(S.park); if (!live[S.park]) refreshLive(); });
   const p = park();
   $("loc").innerHTML = allLands().map(l => '<option'+((S.loc[S.park]||p.lands[0])===l?' selected':'')+'>'+esc(l)+'</option>').join("");
   $("addLand").innerHTML = allLands().map(l => '<option>'+esc(l)+'</option>').join("");
@@ -1593,20 +1608,53 @@ function legPointsRing(a, b){
   for (let k = i; k !== j; ){ k = (k + dir + n) % n; out.push(L[k]); }
   return out;
 }
+/* Route geometry: each leg follows real walkways when they're loaded, otherwise the area loop. */
+function routeGeom(P){
+  const p = park(), g = graphFor(S.park), fit = P.steps.filter(x => x.fits), me = myPoint();
+  const startLand = S.loc[S.park] || p.lands[0];
+  const start = (P.fromHere && me) ? me : landPoint(S.park, startLand);
+  let curPos = start, curLand = startLand;
+  const legs = [], stops = [];
+  fit.forEach((x, i) => {
+    const pos = posOf(x.r); if (!pos || !curPos) return;
+    let st = stops.find(q => meters(q.pt, pos) < 15);
+    if (!st) stops.push(st = {pt:pos, nums:[], names:[]});
+    st.nums.push(i+1); st.names.push(x.r.name);
+    if (meters(curPos, pos) > 15){
+      let coords = g ? osmPath(g, curPos, pos) : null;
+      if (!coords){
+        coords = [curPos].concat(legPoints(curLand, x.r.land).map(l => landPoint(S.park, l))).filter(Boolean);
+        coords[coords.length-1] = pos; if (coords.length < 2) coords.unshift(curPos);
+      }
+      legs.push(coords);
+    }
+    curPos = pos; curLand = x.r.land;
+  });
+  return {legs, stops, start, me, real: !!g};
+}
+const stopLabel = st => st.nums.length > 3 ? st.nums[0]+"–"+st.nums[st.nums.length-1] : st.nums.join(",");
 function mapSvg(P){
-  const g = GEO[S.park]; if (!g || !P) return "";
-  const p = park(), kx = Math.cos(g.center[0]*Math.PI/180);
-  const proj = pt => [(pt[1]-g.center[1])*kx*111320, -(pt[0]-g.center[0])*111320];
-  const L = {}; allLands().forEach(l => L[l] = proj(landPoint(S.park, l)));
-  const me = (lastFix && Date.now()-lastFix.at < 600000 && meters(lastFix.pt, g.center) < 1500) ? proj(lastFix.pt) : null;
-  const all = Object.values(L).concat(me ? [me] : []);
+  if (!GEO[S.park] || !P) return "";
+  const p = park(), g = graphFor(S.park), c = parkCenter(S.park), kx = Math.cos(c[0]*Math.PI/180);
+  const proj = pt => [(pt[1]-c[1])*kx*111320, -(pt[0]-c[0])*111320];
+  const rg = routeGeom(P);
+  const L = {}; allLands().forEach(l => { const q = landPoint(S.park, l); if (q) L[l] = proj(q); });
+  const all = Object.values(L).concat(rg.stops.map(q => proj(q.pt)), rg.me ? [proj(rg.me)] : []);
   const xs = all.map(a => a[0]), ys = all.map(a => a[1]);
   const span = Math.max(Math.max(...xs)-Math.min(...xs), Math.max(...ys)-Math.min(...ys));
-  const pad = span*0.16 + 30, x0 = Math.min(...xs)-pad, y0 = Math.min(...ys)-pad;
-  const W = Math.max(...xs)+pad-x0, H = Math.max(...ys)+pad*1.25-y0, u = Math.max(W, H)/100;
+  const pad = span*0.12 + 30, x0 = Math.min(...xs)-pad, y0 = Math.min(...ys)-pad;
+  const W = Math.max(...xs)+pad-x0, H = Math.max(...ys)+pad*1.2-y0, u = Math.max(W, H)/100;
   const f = n => n.toFixed(1), o = [];
   const line = (pts, attrs) => '<polyline points="'+pts.map(q => f(q[0])+","+f(q[1])).join(" ")+'" fill="none" stroke-linecap="round" stroke-linejoin="round" '+attrs+'/>';
-  if (p.layout === "ring"){
+  if (g){   // real walkways as the base map
+    const d = [], x1 = x0 + W, y1 = y0 + H;
+    for (let k = 0; k < g.edges.length; k += 2){
+      const A = proj([g.lat[g.edges[k]], g.lon[g.edges[k]]]), B = proj([g.lat[g.edges[k+1]], g.lon[g.edges[k+1]]]);
+      if ((A[0] < x0 && B[0] < x0) || (A[0] > x1 && B[0] > x1) || (A[1] < y0 && B[1] < y0) || (A[1] > y1 && B[1] > y1)) continue;
+      d.push("M"+f(A[0])+" "+f(A[1])+"L"+f(B[0])+" "+f(B[1]));
+    }
+    o.push('<path d="'+d.join("")+'" fill="none" stroke="var(--line)" stroke-width="'+f(u*0.9)+'" stroke-linecap="round"/>');
+  } else if (p.layout === "ring"){
     const r = Math.min(...p.lands.slice(1).map(l => Math.hypot(L[l][0], L[l][1])))*0.62;
     o.push('<ellipse cx="0" cy="0" rx="'+f(r*1.15)+'" ry="'+f(r*0.9)+'" fill="var(--water)"/>');
     o.push(line(p.lands.slice(1).concat(p.lands[1]).map(l => L[l]), 'stroke="var(--line)" stroke-width="'+f(u*2.2)+'"'));
@@ -1617,42 +1665,24 @@ function mapSvg(P){
     o.push('<circle cx="'+f(h[0])+'" cy="'+f(h[1])+'" r="'+f(u*10)+'" fill="var(--water)"/>');
     p.lands.forEach(l => { if (l !== p.hub) o.push(line([h, L[l]], 'stroke="var(--line)" stroke-width="'+f(u*2.2)+'"')); });
   }
-  for (const [l, sp] of Object.entries(spurs())) o.push(line([L[sp.via], L[l]], 'stroke="var(--line)" stroke-width="'+f(u*2.2)+'" stroke-dasharray="'+f(u*1.5)+' '+f(u*1.2)+'"'));
-  // route
-  const fit = P.steps.filter(x => x.fits);
-  let cur = S.loc[S.park] || p.lands[0];
-  const legs = [], stops = {};
-  fit.forEach((x, i) => {
-    if (!L[x.r.land]) return;
-    (stops[x.r.land] = stops[x.r.land] || []).push(i+1);
-    if (x.r.land !== cur){ legs.push([cur].concat(legPoints(cur, x.r.land))); cur = x.r.land; }
-  });
-  legs.forEach((leg, i) => {
-    const pts = leg.map(l => L[l]);
-    if (i === 0 && me) pts[0] = me;
-    o.push(line(pts, i === 0
-      ? 'stroke="var(--accent)" stroke-width="'+f(u*1.6)+'"'
-      : 'stroke="var(--accent)" stroke-opacity=".45" stroke-width="'+f(u*1.1)+'" stroke-dasharray="'+f(u*2)+' '+f(u*2)+'"'));
-  });
-  const fs = u*2.9;
-  // you
-  const start = me || L[S.loc[S.park] || p.lands[0]];
-  if (start){
-    o.push('<circle cx="'+f(start[0])+'" cy="'+f(start[1])+'" r="'+f(u*4.2)+'" fill="var(--me)" fill-opacity=".22"/>');
-    o.push('<circle cx="'+f(start[0])+'" cy="'+f(start[1])+'" r="'+f(u*1.9)+'" fill="var(--me)" stroke="var(--surface)" stroke-width="'+f(u*.7)+'"/>');
-    o.push('<text x="'+f(start[0])+'" y="'+f(start[1]-u*5)+'" text-anchor="middle" font-size="'+f(fs)+'" font-weight="700" fill="var(--me)" stroke="var(--surface)" stroke-width="'+f(u*.9)+'" paint-order="stroke" font-family="var(--body)">'+(me?"You":"Start")+'</text>');
+  rg.legs.forEach((leg, i) => o.push(line(leg.map(proj), i === 0
+      ? 'stroke="var(--accent)" stroke-width="'+f(u*1.5)+'"'
+      : 'stroke="var(--accent)" stroke-opacity=".5" stroke-width="'+f(u*1.0)+'" stroke-dasharray="'+f(u*1.8)+' '+f(u*1.6)+'"')));
+  const fs = u*2.7;
+  for (const l in L){
+    const [x, y] = L[l];
+    o.push('<text x="'+f(x)+'" y="'+f(y+u*6.5)+'" text-anchor="middle" font-size="'+f(fs)+'" fill="var(--muted)" stroke="var(--surface)" stroke-width="'+f(u*.9)+'" paint-order="stroke" font-family="var(--body)" font-weight="700">'+esc(l)+'</text>');
   }
-  // areas + stop badges
-  allLands().forEach(l => {
-    const [x, y] = L[l], st = stops[l];
-    o.push('<circle cx="'+f(x)+'" cy="'+f(y)+'" r="'+f(u*1.1)+'" fill="var(--muted)"/>');
-    o.push('<text x="'+f(x)+'" y="'+f(y + (st ? u*7.2 : u*4.6))+'" text-anchor="middle" font-size="'+f(fs)+'" fill="var(--muted)" stroke="var(--surface)" stroke-width="'+f(u*.9)+'" paint-order="stroke" font-family="var(--body)">'+esc(l)+'</text>');
-    if (st){
-      const txt = st.length > 3 ? st[0]+"–"+st[st.length-1] : st.join(","), w = Math.max(u*6.4, (txt.length*0.62+1.6)*fs);
-      const first = st[0] === 1;
-      o.push('<rect x="'+f(x-w/2)+'" y="'+f(y-u*3.2)+'" width="'+f(w)+'" height="'+f(u*6.4)+'" rx="'+f(u*3.2)+'" fill="'+(first?"var(--ticket)":"var(--accent)")+'" stroke="var(--surface)" stroke-width="'+f(u*.6)+'"/>');
-      o.push('<text x="'+f(x)+'" y="'+f(y+fs*0.36)+'" text-anchor="middle" font-size="'+f(fs*1.05)+'" font-weight="700" fill="'+(first?"var(--ticket-ink)":"var(--accent-ink)")+'" font-family="var(--display)">'+txt+'</text>');
-    }
+  if (rg.start){
+    const st = proj(rg.start);
+    o.push('<circle cx="'+f(st[0])+'" cy="'+f(st[1])+'" r="'+f(u*4.2)+'" fill="var(--me)" fill-opacity=".22"/>');
+    o.push('<circle cx="'+f(st[0])+'" cy="'+f(st[1])+'" r="'+f(u*1.9)+'" fill="var(--me)" stroke="var(--surface)" stroke-width="'+f(u*.7)+'"/>');
+    o.push('<text x="'+f(st[0])+'" y="'+f(st[1]-u*5)+'" text-anchor="middle" font-size="'+f(fs)+'" font-weight="700" fill="var(--me)" stroke="var(--surface)" stroke-width="'+f(u*.9)+'" paint-order="stroke" font-family="var(--body)">'+(rg.me && P.fromHere ? "You" : "Start")+'</text>');
+  }
+  rg.stops.forEach(q => {
+    const [x, y] = proj(q.pt), txt = stopLabel(q), w = Math.max(u*6, (txt.length*0.62+1.6)*fs), first = q.nums[0] === 1;
+    o.push('<g><title>'+esc(q.names.join(", "))+'</title><rect x="'+f(x-w/2)+'" y="'+f(y-u*3)+'" width="'+f(w)+'" height="'+f(u*6)+'" rx="'+f(u*3)+'" fill="'+(first?"var(--ticket)":"var(--accent)")+'" stroke="var(--surface)" stroke-width="'+f(u*.6)+'"/>'+
+      '<text x="'+f(x)+'" y="'+f(y+fs*0.38)+'" text-anchor="middle" font-size="'+f(fs*1.05)+'" font-weight="700" fill="'+(first?"var(--ticket-ink)":"var(--accent-ink)")+'" font-family="var(--display)">'+txt+'</text></g>');
   });
   return '<svg viewBox="'+[x0,y0,W,H].map(f).join(" ")+'" role="img" aria-label="Map of '+esc(p.name)+' with your route. Yellow badge is your next stop.">'+o.join("")+'</svg>';
 }
@@ -1664,13 +1694,14 @@ const TILES = {
   sat: {url:"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", attr:"Imagery © Esri, Maxar, Earthstar Geographics"}
 };
 const mapMode = () => tilesBlocked ? "draw" : (S.mapMode || "draw");
-function myPoint(){ const g = GEO[S.park]; return (lastFix && Date.now()-lastFix.at < 600000 && meters(lastFix.pt, g.center) < 1500) ? lastFix.pt : null; }
+function myPoint(){ return (lastFix && Date.now()-lastFix.at < 600000 && meters(lastFix.pt, parkCenter(S.park)) < 1500) ? lastFix.pt : null; }
 function mapSection(){
   const m = mapMode(), hasCalib = S.calib[S.park] && Object.keys(S.calib[S.park]).length;
   const btn = (k, t) => '<button type="button" data-map="'+k+'" aria-pressed="'+(m===k)+'"'+(tilesBlocked && k !== "draw" ? ' style="opacity:.45"' : '')+'>'+t+'</button>';
   return '<section class="block"><div class="maphead"><span class="label" style="flex:1">Route map</span><div class="seg mini" id="mapSeg" role="group" aria-label="Map style">'+btn("draw","Drawing")+btn("street","Street")+btn("sat","Satellite")+'</div></div>'+
     (tilesBlocked ? '<div class="banner"><b>Street and satellite maps work in the installed app.</b><span>This page isn\'t allowed to load map images, so it shows the drawing instead. Live waits and your location also need the installed app.</span></div>' : '')+
     '<div class="mapcard" id="mapBox"></div>'+
+    '<p class="hint" style="margin:0">'+(graphFor(S.park) ? 'Routes follow real walkways from OpenStreetMap, and walk times use their actual length.' : osmState[REGION[S.park]] === "loading" ? 'Downloading the park\'s walkways… routes will follow real paths in a moment.' : 'Routes use estimated paths between areas. Real walkways load in the installed app.')+'</p>'+
     (m !== "draw" ? '<div class="tools"><button class="chipbtn" type="button" id="pinEdit" aria-pressed="'+pinEdit+'">'+(pinEdit ? "Done moving pins" : "Move area pins")+'</button>'+(hasCalib ? '<button class="chipbtn" type="button" id="pinReset">Reset pins</button>' : '')+'</div>'+
       (pinEdit ? '<p class="hint" style="margin:0">Drag each area\'s pin to where it really is. Your phone saves the new spots and uses them for location and the map.</p>' : '') : '');
 }
@@ -1682,16 +1713,6 @@ function loadLeaflet(){
     .then(() => { if (!window.L) throw new Error("no leaflet"); return window.L; })
     .catch(e => { leafletP = null; throw e; });
   return leafletP;
-}
-function routeLegs(P){
-  const p = park(), fit = P.steps.filter(x => x.fits), legs = [], stops = {};
-  let cur = S.loc[S.park] || p.lands[0];
-  fit.forEach((x, i) => {
-    if (!allLands().includes(x.r.land)) return;
-    (stops[x.r.land] = stops[x.r.land] || []).push(i+1);
-    if (x.r.land !== cur){ legs.push([cur].concat(legPoints(cur, x.r.land))); cur = x.r.land; }
-  });
-  return {legs, stops};
 }
 function useDrawing(){ tilesBlocked = true; if (lmap){ try { lmap.remove(); } catch(e){} lmap = null; } if (tab === "route") renderRoute(); }
 async function mountMap(P){
@@ -1710,21 +1731,20 @@ async function mountMap(P){
   tl.on("tileload", () => ok++);
   tl.on("tileerror", () => { bad++; if (!ok && bad >= 3) useDrawing(); });
   if (lview && lview.park === S.park) m.setView(lview.c, lview.z);
-  else m.fitBounds(allLands().map(l => landPoint(S.park, l)), {padding:[30,30]});
+  else m.fitBounds(allLands().map(l => landPoint(S.park, l)).filter(Boolean), {padding:[30,30]});
   m.on("moveend", () => { lview = {park:S.park, c:m.getCenter(), z:m.getZoom()}; });
-  const me = myPoint(), rl = routeLegs(P);
-  rl.legs.forEach((leg, i) => {
-    const ll = leg.map(l => landPoint(S.park, l)); if (i === 0 && me) ll[0] = me;
-    Lf.polyline(ll, i === 0 ? {color:accent, weight:6, opacity:.95} : {color:accent, weight:4, opacity:.7, dashArray:"8 9"}).addTo(m);
-  });
+  const rg = routeGeom(P);
+  rg.legs.forEach((ll, i) => Lf.polyline(ll, i === 0 ? {color:accent, weight:6, opacity:.95} : {color:accent, weight:4, opacity:.7, dashArray:"8 9"}).addTo(m));
   allLands().forEach(l => {
-    const st = rl.stops[l], txt = st ? (st.length > 3 ? st[0]+"–"+st[st.length-1] : st.join(",")) : "";
-    const html = '<div>'+(st ? '<b class="'+(st[0]===1?"first":"")+'">'+txt+'</b>' : '<i></i>')+'<span>'+esc(l)+'</span></div>';
-    const mk = Lf.marker(landPoint(S.park, l), {icon:Lf.divIcon({className:"qc-pin"+(pinEdit?" drag":""), html, iconSize:null}), draggable:pinEdit, keyboard:false}).addTo(m);
-    if (pinEdit) mk.on("dragend", () => { const q = mk.getLatLng(); (S.calib[S.park] = S.calib[S.park]||{})[l] = [q.lat, q.lng]; persist(); mountMap(lastPlan); });
+    const q = landPoint(S.park, l); if (!q) return;
+    const mk = Lf.marker(q, {icon:Lf.divIcon({className:"qc-pin"+(pinEdit?" drag":""), html:'<div><i></i><span>'+esc(l)+'</span></div>', iconSize:null}), draggable:pinEdit, keyboard:false}).addTo(m);
+    if (pinEdit) mk.on("dragend", () => { const ll = mk.getLatLng(); (S.calib[S.park] = S.calib[S.park]||{})[l] = [ll.lat, ll.lng]; persist(); mountMap(lastPlan); });
   });
-  const start = me || landPoint(S.park, S.loc[S.park] || p.lands[0]);
-  youMarker = Lf.circleMarker(start, {radius:9, color:"#fff", weight:3, fillColor:meCol, fillOpacity:1}).addTo(m).bindTooltip(me ? "You" : "Start", {permanent:true, direction:"top", offset:[0,-8]});
+  if (!pinEdit) rg.stops.forEach(q => {
+    Lf.marker(q.pt, {icon:Lf.divIcon({className:"qc-pin", html:'<div><b class="'+(q.nums[0]===1?"first":"")+'">'+stopLabel(q)+'</b></div>', iconSize:null}), keyboard:false})
+      .addTo(m).bindTooltip(esc(q.names.join(", ")), {direction:"top", offset:[0,-12]});
+  });
+  youMarker = rg.start ? Lf.circleMarker(rg.me || rg.start, {radius:9, color:"#fff", weight:3, fillColor:meCol, fillOpacity:1}).addTo(m).bindTooltip(rg.me ? "You" : "Start", {permanent:true, direction:"top", offset:[0,-8]}) : null;
 }
 function refreshMap(){
   if (!lastPlan || tab !== "route") return;
@@ -1830,16 +1850,203 @@ $("buildBtn").onclick = () => setTab("route");
 $("tabPlan").onclick = () => setTab("plan");
 $("tabRoute").onclick = () => setTab("route");
 
+/* ---------- Real walkways (OpenStreetMap) ----------
+   The installed app downloads the resort's footpaths and ride positions from OpenStreetMap once (free
+   Overpass API), keeps them on the phone for 30 days, and uses them for walking distances, routes drawn
+   along real paths, ride positions and working out which park you're in. Without them, everything
+   falls back to the area-to-area model. */
+const REGION = {usf:"resort", ioa:"resort", epic:"epic"};
+const BBOX = {resort:[28.4650,-81.4790,28.4830,-81.4600], epic:[28.4150,-81.4750,28.4650,-81.4250]};
+const OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
+const osm = {}, osmState = {};                 // region -> hydrated graph; region -> "loading" | "failed" | "ready"
+const graphFor = pid => osm[REGION[pid]] || null;
+function osmQuery(b){
+  const bb = b.join(",");
+  return '[out:json][timeout:60];' +
+    'way["highway"~"^(footway|pedestrian|path|steps|living_street|corridor)$"]('+bb+');out body;>;out skel qt;' +
+    '(node["tourism"="attraction"]('+bb+');way["tourism"="attraction"]('+bb+');node["attraction"]('+bb+');way["attraction"]('+bb+'););out center tags;';
+}
+function osmCompact(data){
+  const pos = new Map(), idx = new Map(), lat = [], lon = [], edges = [], attractions = [];
+  for (const e of data.elements || []) if (e.type === "node" && e.lat != null) pos.set(e.id, [e.lat, e.lon]);
+  const getI = id => { let i = idx.get(id); if (i === undefined){ const p = pos.get(id); if (!p) return -1; i = lat.length; idx.set(id, i); lat.push(+p[0].toFixed(6)); lon.push(+p[1].toFixed(6)); } return i; };
+  for (const e of data.elements || []){
+    const t = e.tags || {};
+    if (e.type === "way" && t.highway && e.nodes){
+      if (/^(private|no)$/.test(t.access || "") || t.foot === "no") continue;
+      for (let k = 1; k < e.nodes.length; k++){ const a = getI(e.nodes[k-1]), b = getI(e.nodes[k]); if (a >= 0 && b >= 0 && a !== b) edges.push(a, b); }
+    } else if (t.name && (t.tourism === "attraction" || t.attraction)){
+      const c = e.type === "node" ? [e.lat, e.lon] : e.center ? [e.center.lat, e.center.lon] : null;
+      if (c) attractions.push([t.name, +c[0].toFixed(6), +c[1].toFixed(6)]);
+    }
+  }
+  return {v:1, at:Date.now(), lat, lon, edges, attractions};
+}
+function osmHydrate(g){
+  const n = g.lat.length, off = new Int32Array(n + 1), E = g.edges;
+  for (let k = 0; k < E.length; k++) off[E[k] + 1]++;
+  for (let i = 0; i < n; i++) off[i + 1] += off[i];
+  const nbr = new Int32Array(E.length), w = new Float32Array(E.length), fill = off.slice(0, n);
+  for (let k = 0; k < E.length; k += 2){
+    const a = E[k], b = E[k+1], d = meters([g.lat[a], g.lon[a]], [g.lat[b], g.lon[b]]);
+    nbr[fill[a]] = b; w[fill[a]++] = d; nbr[fill[b]] = a; w[fill[b]++] = d;
+  }
+  Object.assign(g, {n, off, nbr, w, sp:new Map(), snaps:new Map(), grid:new Map()});
+  for (let i = 0; i < n; i++){ const key = osmCell(g.lat[i], g.lon[i]); let a = g.grid.get(key); if (!a) g.grid.set(key, a = []); a.push(i); }
+  // keep the biggest connected network so we never snap onto an isolated scrap of path
+  const comp = new Int32Array(n).fill(-1); let best = -1, bestSize = 0;
+  for (let s = 0, c = 0; s < n; s++, c++){
+    if (comp[s] >= 0){ c--; continue; }
+    let size = 0; const st = [s]; comp[s] = c;
+    while (st.length){ const u = st.pop(); size++; for (let k = off[u]; k < off[u+1]; k++){ const v = nbr[k]; if (comp[v] < 0){ comp[v] = c; st.push(v); } } }
+    if (size > bestSize){ bestSize = size; best = c; }
+  }
+  g.comp = comp; g.main = best;
+  return g;
+}
+const OSM_CELL = 0.0005;   // ~55 m
+const osmCell = (la, lo) => Math.floor(la / OSM_CELL) + ":" + Math.floor(lo / OSM_CELL);
+function osmSnap(g, pt){
+  const key = pt[0].toFixed(6) + "," + pt[1].toFixed(6);
+  if (g.snaps.has(key)) return g.snaps.get(key);
+  const ci = Math.floor(pt[0] / OSM_CELL), cj = Math.floor(pt[1] / OSM_CELL);
+  let best = -1, bd = Infinity;
+  for (let r = 0; r <= 3 && best < 0; r++)
+    for (let i = ci - r; i <= ci + r; i++) for (let j = cj - r; j <= cj + r; j++){
+      const a = g.grid.get(i + ":" + j); if (!a) continue;
+      for (const v of a){ if (g.comp[v] !== g.main) continue; const d = meters(pt, [g.lat[v], g.lon[v]]); if (d < bd){ bd = d; best = v; } }
+    }
+  const res = best >= 0 ? {v:best, d:bd} : null;
+  g.snaps.set(key, res);
+  return res;
+}
+function osmSssp(g, s){
+  let r = g.sp.get(s); if (r) return r;
+  const dist = new Float64Array(g.n).fill(Infinity), prev = new Int32Array(g.n).fill(-1);
+  const hd = [], hv = [];
+  const push = (d, v) => { let i = hd.length; hd.push(d); hv.push(v); while (i > 0){ const p = (i - 1) >> 1; if (hd[p] <= hd[i]) break; [hd[p], hd[i]] = [hd[i], hd[p]]; [hv[p], hv[i]] = [hv[i], hv[p]]; i = p; } };
+  const pop = () => { const d = hd[0], v = hv[0], ld = hd.pop(), lv = hv.pop(); if (hd.length){ hd[0] = ld; hv[0] = lv; let i = 0; for (;;){ const l = 2*i+1, rr = l+1; let m = i; if (l < hd.length && hd[l] < hd[m]) m = l; if (rr < hd.length && hd[rr] < hd[m]) m = rr; if (m === i) break; [hd[m], hd[i]] = [hd[i], hd[m]]; [hv[m], hv[i]] = [hv[i], hv[m]]; i = m; } } return [d, v]; };
+  dist[s] = 0; push(0, s);
+  while (hd.length){
+    const [d, u] = pop(); if (d > dist[u]) continue;
+    for (let k = g.off[u]; k < g.off[u+1]; k++){ const v = g.nbr[k], nd = d + g.w[k]; if (nd < dist[v]){ dist[v] = nd; prev[v] = u; push(nd, v); } }
+  }
+  r = {dist, prev};
+  if (g.sp.size > 60) g.sp.delete(g.sp.keys().next().value);
+  g.sp.set(s, r);
+  return r;
+}
+/* walking distance in metres along paths, or null if either end is off the path network */
+function osmDist(g, a, b){
+  const sa = osmSnap(g, a), sb = osmSnap(g, b);
+  if (!sa || !sb) return null;
+  const d = osmSssp(g, sa.v).dist[sb.v];
+  return isFinite(d) ? d + sa.d + sb.d : null;
+}
+function osmPath(g, a, b){
+  const sa = osmSnap(g, a), sb = osmSnap(g, b);
+  if (!sa || !sb) return null;
+  const {dist, prev} = osmSssp(g, sa.v);
+  if (!isFinite(dist[sb.v])) return null;
+  const out = [b];
+  for (let v = sb.v; v >= 0; v = prev[v]) out.push([g.lat[v], g.lon[v]]);
+  out.push(a);
+  return out.reverse();
+}
+/* ride and area positions from OpenStreetMap attractions */
+const osmRidePt = {};   // pid -> rideId -> [lat,lon]
+const osmLandPt = {};   // pid -> land -> [lat,lon]
+const osmCenter = {};   // pid -> [lat,lon]
+function osmMatchRides(region){
+  const g = osm[region]; if (!g) return;
+  const atts = g.attractions.map(a => ({n:norm(a[0]), pt:[a[1], a[2]]}));
+  for (const pid in PARKS){
+    if (REGION[pid] !== region) continue;
+    const P = PARKS[pid], c = GEO[pid].center, rp = osmRidePt[pid] = {}, sums = {};
+    for (const r of P.rides.concat(P.eventRides || [])){
+      const cand = atts.filter(a => r.kw.some(k => a.n.includes(k)) && meters(a.pt, c) < 2000)
+                       .sort((x, y) => meters(x.pt, c) - meters(y.pt, c))[0];
+      if (!cand) continue;
+      rp[r.id] = cand.pt;
+      const s = sums[r.land] = sums[r.land] || [0, 0, 0]; s[0] += cand.pt[0]; s[1] += cand.pt[1]; s[2]++;
+    }
+    const lp = osmLandPt[pid] = {};
+    let cl = 0, co = 0, cn = 0;
+    for (const l in sums){ lp[l] = [sums[l][0]/sums[l][2], sums[l][1]/sums[l][2]]; }
+    for (const id in rp){ cl += rp[id][0]; co += rp[id][1]; cn++; }
+    if (cn >= 3) osmCenter[pid] = [cl/cn, co/cn];
+  }
+}
+function ridePoint(r){
+  if (!r) return null;
+  const rp = osmRidePt[S.park] || {};
+  if (rp[r.id]) return rp[r.id];
+  if (r.extra || r.custom){       // live-feed or hand-added items: try a name match too
+    const g = graphFor(S.park);
+    if (g){ const n = norm(r.name), a = g.attractions.find(x => { const m = norm(x[0]); return m.includes(n) || n.includes(m); }); if (a) return [a[1], a[2]]; }
+  }
+  return null;
+}
+const parkCenter = pid => osmCenter[pid] || GEO[pid].center;
+async function ensureOSM(pid){
+  const region = REGION[pid];
+  if (osm[region] || osmState[region] === "loading") return;
+  const cached = load("osm." + region, null);
+  if (cached && cached.v === 1 && Date.now() - cached.at < 30*864e5){
+    osm[region] = osmHydrate(cached); osmState[region] = "ready"; osmMatchRides(region); return;
+  }
+  osmState[region] = "loading";
+  const q = "data=" + encodeURIComponent(osmQuery(BBOX[region]));
+  for (const url of OVERPASS){
+    try {
+      const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), 70000);
+      const res = await fetch(url, {method:"POST", body:q, headers:{"Content-Type":"application/x-www-form-urlencoded"}, signal:ctl.signal});
+      clearTimeout(tm);
+      if (!res.ok) throw new Error(res.status);
+      const g = osmCompact(await res.json());
+      if (g.edges.length < 50) throw new Error("too few paths");
+      save("osm." + region, g);
+      osm[region] = osmHydrate(g); osmState[region] = "ready"; osmMatchRides(region);
+      if (REGION[S.park] === region){ if (tab === "route") buildRoute(); if (lastFix) onFix({coords:{latitude:lastFix.pt[0], longitude:lastFix.pt[1], accuracy:lastFix.acc}}); }
+      return;
+    } catch(e){}
+  }
+  osmState[region] = "failed";
+  if (tab === "route" && REGION[S.park] === region) renderRoute();
+}
+
 /* ---------- Location ---------- */
-let geoId = null, lastFix = null, manualUntil = 0;
+let geoId = null, lastFix = null, manualUntil = 0, parkPickedAt = load("parkPickedAt", 0), parkAsk = null;
 function meters(a, b){
   const toR = x => x*Math.PI/180, dLat = toR(b[0]-a[0]), dLon = toR(b[1]-a[1]);
   const h = Math.sin(dLat/2)**2 + Math.cos(toR(a[0]))*Math.cos(toR(b[0]))*Math.sin(dLon/2)**2;
   return 2*6371000*Math.asin(Math.sqrt(h));
 }
-function gpsLine(t){ const el = $("gpsLine"); el.hidden = !t; el.textContent = t || ""; }
+function gpsLine(t, ask){
+  const el = $("gpsLine");
+  if (ask){
+    el.hidden = false;
+    el.innerHTML = 'Your location looks closer to <b>'+esc(PARKS[ask.park].name)+'</b>. <button type="button" class="chipbtn" id="switchPark">Switch to '+esc(PARKS[ask.park].short)+'</button> <button type="button" class="chipbtn" id="stayPark">Stay on '+esc(park().short)+'</button>';
+    $("switchPark").onclick = () => { S.park = ask.park; parkPickedAt = Date.now(); save("parkPickedAt", parkPickedAt); persist(); renderAll(); refreshLive(); ensureOSM(S.park); gpsLine("Switched. Finding your area…"); };
+    $("stayPark").onclick = () => { parkPickedAt = Date.now(); save("parkPickedAt", parkPickedAt); gpsLine("Staying on "+park().name+". It won't ask again for 30 minutes."); };
+    return;
+  }
+  el.hidden = !t; el.textContent = t || "";
+}
+/* Which park are you in? Nearest real ride position (from OpenStreetMap) when available: within 300 m
+   of a ride counts as sure. Otherwise rough park centres, which only ever suggest, never switch. */
+function detectPark(pt){
+  let best = null, bd = Infinity;
+  for (const pid in osmRidePt) for (const id in osmRidePt[pid]){ const d = meters(pt, osmRidePt[pid][id]); if (d < bd){ bd = d; best = pid; } }
+  if (best && bd < 300) return {park:best, sure:true, d:bd};
+  let cp = null, cd = Infinity;
+  for (const k in GEO){ const d = meters(pt, parkCenter(k)); if (d < cd){ cd = d; cp = k; } }
+  const cur = meters(pt, parkCenter(S.park));
+  if (cp !== S.park && cur - cd < 250) return {park:S.park, sure:false, d:cur};   // too close to call: keep your pick
+  return {park:cp, sure:false, d:cd};
+}
 function renderGpsBtn(){ const b = $("gpsBtn"); b.setAttribute("aria-pressed", String(geoId != null)); b.textContent = geoId != null ? "Location on" : "Use my location"; }
-function landPoint(pid, land){ return (S.calib[pid] && S.calib[pid][land]) || GEO[pid].lands[land]; }
+function landPoint(pid, land){ return (S.calib[pid] && S.calib[pid][land]) || (osmLandPt[pid] && osmLandPt[pid][land]) || GEO[pid].lands[land]; }
 function onFix(pos){
   const pt = [pos.coords.latitude, pos.coords.longitude], acc = Math.round(pos.coords.accuracy || 0);
   lastFix = {pt, acc, at:Date.now()};
@@ -1847,12 +2054,17 @@ function onFix(pos){
   if (tab === "route") setTimeout(() => {
     if (lastPlan && S.startMode === "now" && (!lastPlan.pt || meters(pt, lastPlan.pt) > 80)) buildRoute(); else refreshMap();
   }, 0);
-  let bestP = null, bd = Infinity;
-  for (const k in GEO){ const d = meters(pt, GEO[k].center); if (d < bd){ bd = d; bestP = k; } }
-  if (bd > 1500){ gpsLine("You're about "+(bd/1609).toFixed(1)+" mi from the nearest park, so your location isn't changing the plan yet."); return; }
-  if (bestP !== S.park){ S.park = bestP; persist(); renderAll(); refreshLive(); }
+  const det = detectPark(pt);
+  if (det.d > 1500){ gpsLine("You're about "+(det.d/1609).toFixed(1)+" mi from the nearest park, so your location isn't changing the plan yet."); return; }
+  if (det.park !== S.park){
+    // switch by itself only when a real ride is right next to you and you haven't just picked a park yourself
+    if (det.sure && Date.now() - parkPickedAt > 30*60000){ S.park = det.park; persist(); renderAll(); refreshLive(); ensureOSM(S.park); }
+    else { parkAsk = det.park; gpsLine("", det); return; }
+  }
+  parkAsk = null;
   let land = null, ld = Infinity;
-  for (const l of allLands()){ const d = meters(pt, landPoint(S.park, l)); if (d < ld){ ld = d; land = l; } }
+  for (const l of allLands()){ const q = landPoint(S.park, l); if (!q) continue; const d = meters(pt, q); if (d < ld){ ld = d; land = l; } }
+  for (const r of allRides()){ const q = ridePoint(r); if (!q || !r.land || r.land === "?") continue; const d = meters(pt, q); if (d < ld){ ld = d; land = r.land; } }
   if (Date.now() < manualUntil){ gpsLine("Using the area you picked. Location takes over again in a few minutes."); return; }
   gpsLine("You're near "+land+" (GPS accurate to about "+acc+" m). Wrong area? Pick the right one and the app remembers this spot.");
   if (land !== (S.loc[S.park] || PARKS[S.park].lands[0])){
@@ -1901,6 +2113,7 @@ $("gpsBtn").onclick = () => {
 renderAll();
 if (S.gps) startGPS();
 refreshLive();
+ensureOSM(S.park);
 setInterval(() => { if (!document.hidden) refreshLive(); }, 5*60000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden && live[S.park] && Date.now()-live[S.park].at > 5*60000) refreshLive(); });
 })();
