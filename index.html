@@ -997,7 +997,9 @@ const PARKS = {
     /* opening times from the official app; anything without a listed time opens at 6:30 PM. All editable. */
     eventOpens: {h_jack:"14:00", h_stranger:"14:00", h_hellraiser:"14:00", h_ozzy:"17:15", h_sinners:"17:15",
                  h_evildead:"17:45", h_cyber:"17:45", h_bloodengutz:"17:45", h_invasion:"18:00", h_madlands:"18:00"},
-    eventOpensDefault: "18:30",   // scare zones and anything without a listed time
+    eventOpensDefault: "18:30",
+    eventTimes: {s_nightmare:["20:00","21:30","23:00","00:30"],
+                 s_hawkins:["21:00","21:45","22:30","23:15","00:00","00:45"]},   // scare zones and anything without a listed time
     eventRides: [
       ["h_stranger","Stranger Things 5","Soundstages",120,5,["strangerthings5"],"Haunted house · Access Path A or B"],
       ["h_evildead","Evil Dead Burn","Soundstages",90,5,["evildead"],"Haunted house · Access Path A or B"],
@@ -1014,8 +1016,8 @@ const PARKS = {
       ["z_carnival","Infernal Carnival of Nightmares","Front gate",0,10,["infernalcarnival"],"Scare zone","zone"],
       ["z_fortnite","Fortnitemares","Hollywood",0,10,["fortnitemares"],"Scare zone · on the lagoon","zone"],
       ["c_deatheaters","Death Eaters Encounter","Diagon Alley",0,10,["deatheaters"],"Character encounter","zone"],
-      ["s_nightmare","Nightmare Fuel: Blood Noir","Production Central",0,25,["nightmarefuel","bloodnoir"],"Show · Music Plaza Stage (set its area if it's elsewhere)","show"],
-      ["s_lagoon","Stranger Things lagoon show","?",0,15,["lagoonshow","strangerthingslagoon"],"Show · on the lagoon","show"]
+      ["s_nightmare","Nightmare Fuel: Blood Noir","World Expo",0,25,["nightmarefuel","bloodnoir"],"Stage show","show"],
+      ["s_hawkins","Stranger Things: Return to Hawkins","Hollywood",0,15,["returntohawkins"],"Nighttime show","show"]
     ],
     feedName: /universal studios florida/i, qtId: 65,
     lands: ["Front gate","Minion Land","Production Central","New York","San Francisco","Diagon Alley","World Expo","Springfield","DreamWorks Land","Hollywood"],
@@ -1086,7 +1088,7 @@ const PARKS = {
 };
 for (const id in PARKS) {
   PARKS[id].rides = PARKS[id].rides.map(r => ({id:r[0],name:r[1],land:r[2],peak:r[3],dur:r[4],kw:r[5],note:r[6]||"",show:!!r[7],fixedWait:r[7]?15:null}));
-  PARKS[id].eventRides = (PARKS[id].eventRides || []).map(r => ({id:r[0],name:r[1],land:r[2],peak:r[3],dur:r[4],kw:r[5],note:r[6],opens:(PARKS[id].eventOpens||{})[r[0]],
+  PARKS[id].eventRides = (PARKS[id].eventRides || []).map(r => ({id:r[0],name:r[1],land:r[2],peak:r[3],dur:r[4],kw:r[5],note:r[6],opens:(PARKS[id].eventOpens||{})[r[0]], times:(PARKS[id].eventTimes||{})[r[0]],
     hhn:true, house:!r[7], zone:r[7]==="zone", show:r[7]==="show", fixedWait:r[7]==="zone"?0:r[7]==="show"?15:null}));
 }
 
