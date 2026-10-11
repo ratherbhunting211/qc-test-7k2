@@ -1,5 +1,5 @@
 // Caches the app so it opens instantly and works with spotty park Wi-Fi. Wait times always go to the network.
-const CACHE = "qc-v19";
+const CACHE = "qc-v20";
 const SHELL = ["./", "index.html", "manifest.json", "icon-192.png", "icon-512.png", "icon-180.png", "leaflet.js", "leaflet.css"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))); self.clients.claim(); });

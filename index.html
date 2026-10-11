@@ -1984,6 +1984,7 @@ function osmQuery(b){
   return '[out:json][timeout:90];' +
     '(way["highway"~"^(footway|pedestrian|path|steps|living_street|corridor|service|unclassified|residential|track|cycleway)$"]('+bb+');way["area:highway"]('+bb+');way["place"="square"]('+bb+'););out body;>;out skel qt;' +
     '(way["tourism"="theme_park"]('+bb+');relation["tourism"="theme_park"]('+bb+'););out geom;' +
+    '(way["building"]('+bb+');way["natural"="water"]('+bb+');way["water"]('+bb+'););out geom;' +
     '(node["tourism"="attraction"]('+bb+');way["tourism"="attraction"]('+bb+');node["attraction"]('+bb+');way["attraction"]('+bb+'););out center tags;';
 }
 function inPoly(pt, poly){
@@ -2023,9 +2024,18 @@ function osmCompact(data){
       if (c) attractions.push([t.name, +c[0].toFixed(6), +c[1].toFixed(6)]);
     }
   }
+  // buildings and water inside the parks: gap hops and the last few metres to a stop may not cross them
+  const obstacles = [];
+  for (const e of data.elements || []){
+    const t = e.tags || {};
+    if (e.type !== "way" || !e.geometry || !(t.building || t.natural === "water" || t.water)) continue;
+    if (/^(roof|no|canopy)$/.test(t.building || "")) continue;
+    const ring = e.geometry.map(q => [+q.lat.toFixed(6), +q.lon.toFixed(6)]);
+    if (ring.length >= 4 && (!parks.length || ring.some(inside))) obstacles.push(ring);
+  }
   /* Open plazas (mapped as areas, not lines) can be crossed in a straight line: link points around and
      inside each plaza that can see each other across it. These links are used for routing, not drawn. */
-  const drawn = edges.length;
+  const drawn = edges.length, obsCheck = {obstacles};
   for (const e of data.elements || []){
     const t = e.tags || {};
     if (e.type !== "way" || !e.nodes || e.nodes.length < 4 || e.nodes[0] !== e.nodes[e.nodes.length-1]) continue;
@@ -2039,13 +2049,30 @@ function osmCompact(data){
     if (pts.length > 160){ const step = pts.length / 160; pts = Array.from({length:160}, (_, k) => pts[Math.floor(k * step)]); }
     for (let x = 0; x < pts.length; x++) for (let y = x + 1; y < pts.length; y++){
       const A = [lat[pts[x]], lon[pts[x]]], B = [lat[pts[y]], lon[pts[y]]];
-      if (meters(A, B) > 220) continue;
+      if (meters(A, B) > 150) continue;
       let ok = true;
       for (const f of [0.2, 0.4, 0.6, 0.8]) if (!inPoly([A[0] + (B[0]-A[0])*f, A[1] + (B[1]-A[1])*f], ring)){ ok = false; break; }
-      if (ok) edges.push(pts[x], pts[y]);
+      if (ok && !osmBlocked(obsCheck, A, B)) edges.push(pts[x], pts[y]);
     }
   }
-  return {v:4, at:Date.now(), lat, lon, edges, drawn, attractions, parks:parks.map(p => p.name)};
+  return {v:6, at:Date.now(), lat, lon, edges, drawn, attractions, obstacles, parks:parks.map(p => p.name)};
+}
+function segCross(p1, p2, p3, p4){
+  const o = (a, b, c) => (b[1]-a[1])*(c[0]-a[0]) - (b[0]-a[0])*(c[1]-a[1]);
+  const d1 = o(p3, p4, p1), d2 = o(p3, p4, p2), d3 = o(p1, p2, p3), d4 = o(p1, p2, p4);
+  return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
+}
+/* does the straight line A-B pass through a building or water? (ignores one that contains A or B) */
+function osmBlocked(g, A, B){
+  if (!g.obs) g.obs = (g.obstacles || []).map(r => ({r, a0:Math.min(...r.map(q => q[0])), a1:Math.max(...r.map(q => q[0])), o0:Math.min(...r.map(q => q[1])), o1:Math.max(...r.map(q => q[1]))}));
+  const a0 = Math.min(A[0], B[0]), a1 = Math.max(A[0], B[0]), o0 = Math.min(A[1], B[1]), o1 = Math.max(A[1], B[1]);
+  for (const ob of g.obs){
+    if (ob.a1 < a0 || ob.a0 > a1 || ob.o1 < o0 || ob.o0 > o1) continue;
+    if (inPoly(A, ob.r) || inPoly(B, ob.r)) continue;
+    if (inPoly([(A[0]+B[0])/2, (A[1]+B[1])/2], ob.r)) return true;
+    for (let k = 1; k < ob.r.length; k++) if (segCross(A, B, ob.r[k-1], ob.r[k])) return true;
+  }
+  return false;
 }
 function osmHydrate(g){
   /* OpenStreetMap often leaves small gaps where paths meet. Join pieces that come within 25 m of each other
@@ -2063,22 +2090,23 @@ function osmHydrate(g){
       for (const j of a){
         if (j <= i) continue;
         const ri = find(i), rj = find(j); if (ri === rj) continue;
-        if (meters([g.lat[i], g.lon[i]], [g.lat[j], g.lon[j]]) < 25){ extra.push(i, j); par[ri] = rj; }
+        const P = [g.lat[i], g.lon[i]], Q = [g.lat[j], g.lon[j]];
+        if (meters(P, Q) < 25 && !osmBlocked(g, P, Q)){ extra.push(i, j); par[ri] = rj; }
       }
     }
   }
   // Where OpenStreetMap is missing a link entirely, connect the closest points of separate path networks
-  // (up to 170 m apart). These "gap hops" count double, so real paths are always preferred.
+  // (up to 80 m apart, never through a building or water). Hops count triple, so real paths always win.
   const gapStart = g.edges.length + extra.length, gapBest = new Map();
   for (let i = 0; i < n0; i++){
     const ci = Math.floor(g.lat[i] / OSM_CELL), cj = Math.floor(g.lon[i] / OSM_CELL), ri = find(i);
-    for (let di = -3; di <= 3; di++) for (let dj = -3; dj <= 3; dj++){
+    for (let di = -2; di <= 2; di++) for (let dj = -2; dj <= 2; dj++){
       const a = cellOf.get((ci + di) + ":" + (cj + dj)); if (!a) continue;
       for (const j of a){
         const rj = find(j); if (rj <= ri) continue;
-        const d = meters([g.lat[i], g.lon[i]], [g.lat[j], g.lon[j]]); if (d > 170) continue;
+        const d = meters([g.lat[i], g.lon[i]], [g.lat[j], g.lon[j]]); if (d > 80) continue;
         const key = ri + "_" + rj, cur = gapBest.get(key);
-        if (!cur || d < cur[2]) gapBest.set(key, [i, j, d]);
+        if ((!cur || d < cur[2]) && !osmBlocked(g, [g.lat[i], g.lon[i]], [g.lat[j], g.lon[j]])) gapBest.set(key, [i, j, d]);
       }
     }
   }
@@ -2090,7 +2118,7 @@ function osmHydrate(g){
   for (let i = 0; i < n; i++) off[i + 1] += off[i];
   const nbr = new Int32Array(E.length), w = new Float32Array(E.length), fill = off.slice(0, n);
   for (let k = 0; k < E.length; k += 2){
-    const a = E[k], b = E[k+1], d = meters([g.lat[a], g.lon[a]], [g.lat[b], g.lon[b]]) * (k >= g.gapStart ? 2 : 1);
+    const a = E[k], b = E[k+1], d = meters([g.lat[a], g.lon[a]], [g.lat[b], g.lon[b]]) * (k >= g.gapStart ? 3 : 1);
     nbr[fill[a]] = b; w[fill[a]++] = d; nbr[fill[b]] = a; w[fill[b]++] = d;
   }
   Object.assign(g, {n, off, nbr, w, sp:new Map(), snaps:new Map(), grid:new Map()});
@@ -2114,13 +2142,16 @@ function osmSnap(g, pt, comp){
   const key = pt[0].toFixed(6) + "," + pt[1].toFixed(6) + "|" + (comp == null ? "" : comp);
   if (g.snaps.has(key)) return g.snaps.get(key);
   const ci = Math.floor(pt[0] / OSM_CELL), cj = Math.floor(pt[1] / OSM_CELL);
-  let best = -1, bd = Infinity;
-  for (let r = 0; r <= 5 && best < 0; r++)
+  const cand = [];
+  for (let r = 0; r <= 5 && cand.length < 12; r++)
     for (let i = ci - r; i <= ci + r; i++) for (let j = cj - r; j <= cj + r; j++){
+      if (Math.max(Math.abs(i - ci), Math.abs(j - cj)) !== r) continue;
       const a = g.grid.get(i + ":" + j); if (!a) continue;
-      for (const v of a){ if (comp != null && g.comp[v] !== comp) continue; const d = meters(pt, [g.lat[v], g.lon[v]]); if (d < bd){ bd = d; best = v; } }
+      for (const v of a){ if (comp != null && g.comp[v] !== comp) continue; const d = meters(pt, [g.lat[v], g.lon[v]]); if (d < 250) cand.push([d, v]); }
     }
-  const res = best >= 0 && bd < 250 ? {v:best, d:bd} : null;
+  cand.sort((x, y) => x[0] - y[0]);
+  const pick = cand.slice(0, 12).find(c => !osmBlocked(g, pt, [g.lat[c[1]], g.lon[c[1]]])) || cand[0];
+  const res = pick ? {v:pick[1], d:pick[0]} : null;
   g.snaps.set(key, res);
   return res;
 }
@@ -2202,7 +2233,7 @@ async function ensureOSM(pid){
   const region = REGION[pid];
   if (osm[region] || osmState[region] === "loading") return;
   const cached = load("osm." + region, null);
-  if (cached && cached.v === 4 && Date.now() - cached.at < 30*864e5){
+  if (cached && cached.v === 6 && Date.now() - cached.at < 30*864e5){
     osm[region] = osmHydrate(cached); osmState[region] = "ready"; osmMatchRides(region); return;
   }
   osmState[region] = "loading";
