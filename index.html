@@ -193,7 +193,7 @@ nav.tabs button[aria-pressed="true"]{color:var(--accent)}
 .pill.live{background:color-mix(in srgb,var(--good) 18%,var(--surface));color:var(--good)}
 .pill.must{background:var(--ticket);color:var(--ticket-ink)}
 .actions{display:flex;gap:8px}
-.actions button{flex:1;border-radius:12px;padding:10px;font-weight:700;border:1px solid var(--line);background:var(--surface-2)}
+.actions button{flex:1;min-width:0;border-radius:12px;padding:10px;font-weight:700;border:1px solid var(--line);background:var(--surface-2)}
 .actions .done{background:linear-gradient(120deg,var(--g1),var(--g2));color:#fff;border-color:transparent}
 .late .card{opacity:.72;border-style:dashed;box-shadow:none}
 .empty{padding:40px 12px;text-align:center;color:var(--muted);display:grid;gap:10px;justify-items:center}
@@ -1135,7 +1135,7 @@ function save(k, v){ try { localStorage.setItem("qc."+k, JSON.stringify(v)); } c
 const S = Object.assign({
   park: "usf", loc: {}, startMode: "now", start: "09:00", end: {}, crowd: 1,
   sel: {}, must: {}, done: {}, overrides: {},
-  event: {}, custom: {}, extraLand: {}, calib: {}, seen: {}, gps: false, plan: null, low: {}, pace: {mode:"normal", speed:0, minutes:0}, evHours: {}, opens: {}, showtimes: {}
+  event: {}, custom: {}, extraLand: {}, calib: {}, seen: {}, gps: false, plan: null, low: {}, inLine: null, pace: {mode:"normal", speed:0, minutes:0}, evHours: {}, opens: {}, showtimes: {}
 }, load("state", {}));
 let samples = load("samples", {});          // park -> ride -> hour -> [sum,count]
 const live = {};                             // park -> {rides:{id:{wait,status}}, extras:[], at}
@@ -1147,7 +1147,7 @@ if (!S.evHours.usf){   // your Horror Nights ticket: 2 PM to 2 AM
   if (!S.end.usf_hhn || S.end.usf_hhn === "01:00") S.end.usf_hhn = "02:00";
 }
 function persist(){ save("state", {park:S.park,loc:S.loc,startMode:S.startMode,start:S.start,end:S.end,crowd:S.crowd,sel:S.sel,must:S.must,done:S.done,overrides:S.overrides,
-  event:S.event,plan:S.plan,low:S.low,evHours:S.evHours,opens:S.opens,showtimes:S.showtimes,custom:S.custom,pace:S.pace,mapMode:S.mapMode,extraLand:S.extraLand,calib:S.calib,seen:S.seen,gps:S.gps}); }
+  event:S.event,plan:S.plan,low:S.low,inLine:S.inLine,evHours:S.evHours,opens:S.opens,showtimes:S.showtimes,custom:S.custom,pace:S.pace,mapMode:S.mapMode,extraLand:S.extraLand,calib:S.calib,seen:S.seen,gps:S.gps}); }
 
 /* ---------- Helpers ---------- */
 const $ = id => document.getElementById(id);
@@ -1501,7 +1501,11 @@ function planOrder(rides, t0, loc0, now, deadline, must, low){
 function buildRoute(auto, reopt){
   const p = park(), now = nowT(), key = K();
   const sel = S.sel[key] || [], done = S.done[key] || {}, must = S.must[key] || {}, low = (S.low || {})[key] || {};
-  const pool = allRides().filter(r => sel.includes(r.id) && !done[r.id]);
+  const pool0 = allRides().filter(r => sel.includes(r.id) && !done[r.id]);
+  // "I'm in line": that ride is fixed as the current stop and everything else is planned from when you're off it
+  const il = S.inLine && S.inLine.key === key && S.inLine.day === new Date().toDateString() ? S.inLine : null;
+  const IL = il ? pool0.find(r => r.id === il.id) : null;
+  const pool = pool0.filter(r => r !== IL);
   const closed = pool.filter(r => unavailable(r));
   const rides = pool.filter(r => !unavailable(r));
   const st = startTime();
@@ -1509,8 +1513,13 @@ function buildRoute(auto, reopt){
   if (deadline <= st.t) deadline += 24*60;
   let closeT = T(toMin(hours().close)); if (closeT <= st.t) closeT += 24*60;
   LINE_BY = deadline >= closeT ? closeT - 1 : null;   // only when you're staying until closing
-  const fromHere = st.t <= now + 1 && !!myPoint() && lastFix.acc <= 60;
-  const loc = fromHere ? HERE : (S.loc[S.park] || p.lands[0]);
+  const fromHere = !IL && st.t <= now + 1 && !!myPoint() && lastFix.acc <= 60;
+  let loc = fromHere ? HERE : (S.loc[S.park] || p.lands[0]), t0 = st.t, ilStep = null;
+  if (IL){
+    const expEnd = il.t + il.wait + IL.dur, end = Math.max(expEnd, now + Math.min(5, IL.dur));   // running long: assume you're nearly on
+    ilStep = {r:IL, walk:0, arrive:il.t, hold:0, wait:il.wait, end, fits:true, inLineNow:true, expEnd};
+    t0 = end; loc = IL;
+  }
   const lockedIds = !reopt && S.plan && S.plan.key === key ? S.plan.order : null;
   let order, alert = null, better = null;
   if (lockedIds){
@@ -1522,18 +1531,18 @@ function buildRoute(auto, reopt){
     const nextClosed = nextId && closed.find(r => r.id === nextId);
     if (nextClosed) alert = nextClosed.name + " is " + (unavailable(nextClosed) === "DOWN" ? "temporarily down" : "closed") + " right now, so it's set aside and your route carries on with the next stop. It slots back in if it reopens. Tap Replan if you'd like a fresh order.";
     if (order.length > 1){   // would a fresh plan be clearly better? (checked every time the route is shown)
-      const cur = simulate(order, st.t, loc, now, deadline), alt = simulate(planOrder(rides, st.t, loc, now, deadline, must, low), st.t, loc, now, deadline);
+      const cur = simulate(order, t0, loc, now, deadline), alt = simulate(planOrder(rides, t0, loc, now, deadline, must, low), t0, loc, now, deadline);
       const fits = x => x.filter(q => q.fits).length, endOf = x => { const f = x.filter(q => q.fits); return f.length ? f[f.length-1].end : 0; };
       const idleOf = x => x.filter(q => q.fits).reduce((a, q) => a + (q.hold || 0), 0);
       const moreFits = fits(alt) - fits(cur), saves = Math.round(endOf(cur) - endOf(alt)), lessIdle = Math.round(idleOf(cur) - idleOf(alt));
       if (moreFits > 0 || (moreFits === 0 && (saves >= 15 || lessIdle >= 20))) better = {moreFits, saves, lessIdle, at: Date.now()};
     }
   } else {
-    order = planOrder(rides, st.t, loc, now, deadline, must, low);
-    S.plan = {key, order: order.map(r => r.id), at: Date.now()}; persist();
+    order = planOrder(rides, t0, loc, now, deadline, must, low);
+    S.plan = {key, order: (IL ? [IL.id] : []).concat(order.map(r => r.id)), at: Date.now()}; persist();
   }
-  const steps = simulate(order, st.t, loc, now, deadline);
-  const naive = simulate(rides, st.t, loc, now, deadline);
+  const steps = (ilStep ? [ilStep] : []).concat(simulate(order, t0, loc, now, deadline));
+  const naive = (ilStep ? [ilStep] : []).concat(simulate(rides, t0, loc, now, deadline));
   lastPlan = {steps, closed, st, deadline, naive, key, checkedAt: Date.now(), fromHere, pt: myPoint(), locked: !!lockedIds,
     doneCount: Object.keys(done).filter(k => done[k]).length, change: null, alert, better};
   if (alert && auto){ try { if (navigator.vibrate) navigator.vibrate([120,80,120]); } catch(e){} }
@@ -1698,7 +1707,10 @@ function renderRoute(){
       (s.noShow ? '<div class="meta"><span>No showtimes left that you can reach tonight</span></div>' : '')+
       (s.hold > 0 && !s.showAt ? '<div class="meta"><span class="pill must">Opens '+fmtShort(s.opens)+'</span><span>You\'ll be there <b>'+Math.round(s.hold)+'</b> min before it opens</span></div>' : '')+
       (s.r.note && !s.r.show && !s.r.custom && !s.r.extra ? '<div class="hint">'+esc(s.r.note)+'</div>' : '')+
-      (isLate ? '' : '<div class="actions"><button type="button" class="done" data-done="'+s.r.id+'">Done ✓</button><button type="button" data-skip="'+s.r.id+'">Skip</button></div>')+
+      (s.inLineNow ? '<div class="meta"><span class="pill live">In line</span><span>Since <b>'+fmtShort(s.arrive)+'</b> · expected off by <b>'+fmtShort(s.end)+'</b>'+(s.end > s.expEnd + 1 ? ' (running long)' : '')+'</span></div>' : '')+
+      (isLate ? '' : s.inLineNow
+        ? '<div class="actions"><button type="button" class="done" data-done="'+s.r.id+'">Done ✓</button><button type="button" data-leftline="'+s.r.id+'">Left the line</button></div>'
+        : '<div class="actions">'+(i === 0 ? '<button type="button" data-inline="'+s.r.id+'">I\'m in line</button>' : '')+'<button type="button" class="done" data-done="'+s.r.id+'">Done ✓</button><button type="button" data-skip="'+s.r.id+'">Skip</button></div>')+
       '</div></li>';
   };
   const ch = P.change, nextFit = fit[0];
@@ -2017,7 +2029,15 @@ $("routeBody").addEventListener("click", e => {
   if (b.id === "pinEdit"){ pinEdit = !pinEdit; renderRoute(); return; }
   if (b.id === "osmReload"){ const rg = REGION[S.park]; delete osm[rg]; delete osmState[rg]; try { localStorage.removeItem("qc.osm." + rg); } catch(e){} ensureOSM(S.park); renderRoute(); return; }
   if (b.id === "pinReset"){ delete S.calib[S.park]; persist(); renderRoute(); return; }
+  if (b.dataset.inline){
+    const r = allRides().find(x => x.id === b.dataset.inline); if (!r) return;
+    const now = nowT(), c = currentWait(r);
+    S.inLine = {key:K(), id:r.id, t:now, day:new Date().toDateString(), wait: Math.round(c && c.wait != null ? c.wait : waitAt(r, now, now))};
+    persist(); buildRoute(); return;
+  }
+  if (b.dataset.leftline){ S.inLine = null; persist(); buildRoute(); return; }
   const id = b.dataset.done || b.dataset.skip; if (!id) return;
+  if (S.inLine && S.inLine.id === id) S.inLine = null;
   const r = allRides().find(x => x.id === id);
   if (b.dataset.done){ const d = S.done[K()] = S.done[K()]||{}; d[id] = true; if (r && r.land !== "?") S.loc[S.park] = r.land; }
   else { S.sel[K()] = (S.sel[K()]||[]).filter(x => x !== id); }
