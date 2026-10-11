@@ -955,7 +955,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
       <p class="hint" style="margin:0">Tick what you want. ★ marks a must-do, so the route never drops it. Tap a wait sign to type the posted wait from the official app.</p>
       <div id="liveNote"></div>
       <details class="addbox" id="feedBox"><summary>Check what the live feed lists</summary><div id="feedList"></div></details>
-      <p class="hint" id="verLine" style="margin:10px 0 0">App version 48 · <button type="button" class="chipbtn lowbtn" id="checkUpdate">Check for update</button></p>
+      <p class="hint" id="verLine" style="margin:10px 0 0">App version 50 · <button type="button" class="chipbtn lowbtn" id="checkUpdate">Check for update</button></p>
       <div id="rideList" style="display:grid;gap:12px"></div>
       <details class="addbox" id="mealBox"><summary>Dining reservations</summary>
         <div class="addform">
@@ -1172,6 +1172,7 @@ function nightId(){ return new Date(Date.now() - 6*3600000).toDateString(); }
 // a new day/night: clear what you rode, the locked order, passes and picks from last time (not on first run)
 if (S.night && S.night !== nightId()){ S.done = {}; S.plan = null; S.inLine = null; S.aqa = {}; S.pick = {}; S.adj = {}; S.feedExtras = {}; }
 S.night = nightId();
+if (S.pace && !S.pace.v2){ S.pace = Object.assign({}, S.pace, {speed:0, minutes:0, v2:true}); }   // old measurements counted standing in line
 let samples = load("samples", {});          // park -> ride -> hour -> [sum,count]
 const live = {};                             // park -> {rides:{id:{wait,status}}, extras:[], at}
 let tab = "plan";
@@ -1222,7 +1223,7 @@ const HERE = "__here";
 const PACE = {fast:0.8, normal:1, slow:1.35};
 function paceFactor(){
   const pc = S.pace || {};
-  if (pc.mode === "auto") return pc.minutes >= 3 && pc.speed ? Math.min(2, Math.max(0.6, 70 / pc.speed)) : 1;
+  if (pc.mode === "auto") return pc.minutes >= 3 && pc.speed ? Math.min(1.4, Math.max(0.75, 70 / pc.speed)) : 1;
   return PACE[pc.mode] || 1;
 }
 function walk(from, to){ return Math.max(1, Math.round(walkBase(from, to) * paceFactor())); }
@@ -1891,6 +1892,8 @@ function markInLine(id){
   if (S.done[k]) delete S.done[k][id];
   S.plan = null; S.startMode = "now"; persist();
 }
+const startPicker = () => { const cur = S.loc[S.park] || park().lands[0];
+  return '<select class="area" id="routeLoc" aria-label="Where you are now" style="display:inline-block;width:auto;margin-left:4px;text-transform:none">'+allLands().map(l => '<option'+(l === cur ? ' selected' : '')+'>'+esc(l)+'</option>').join("")+'</select>'; };
 let routePending = false;
 function renderRoute(){
   const ae = document.activeElement;
@@ -1922,7 +1925,7 @@ function renderRoute(){
     return '<li class="step'+(i===0&&!isLate?" next":"")+'"><div class="when">'+fmtShort(s.arrive).replace(/([ap])$/,'<small>$1m</small>')+'</div><div class="card">'+
       '<h3>'+esc(s.r.name)+'</h3>'+
       '<div class="meta"><span>'+esc(s.r.land==="?" ? (s.r.meal ? (s.r.extWalk != null ? "Outside the park" : "CityWalk") : "Location unknown") : s.r.land)+'</span>'+(must[s.r.id]?'<span class="pill must">Must-do</span>':'')+(lowR[s.r.id]?'<span class="pill">If time</span>':'')+src+'</div>'+
-      '<div class="meta"><span>Walk <b>'+s.walk+'</b> min'+(i===0 && !isLate && P.fromHere ? ' from you' : '')+'</span><span>'+(s.r.zone?'No line':s.r.show?'Arrive early <b>'+earlyOf(s.r)+'</b> min':'Wait <b>~'+round5(s.wait)+'</b> min')+'</span><span>'+(s.r.zone?'Walk-through':s.r.meal?'Meal':s.r.show?'Show':(s.r.house||(s.r.extra&&eventOn()))?'Inside':'Ride')+' <b>'+s.r.dur+'</b> min</span><span>Out by <b>'+fmtShort(s.end)+'</b></span></div>'+
+      '<div class="meta"><span>Walk <b>'+s.walk+'</b> min'+(i===0 && !isLate ? (P.fromHere ? ' from you' : s.inLineNow ? '' : ' from '+esc(S.loc[S.park] || park().lands[0])) + (Math.abs(paceFactor() - 1) >= 0.1 ? ' ('+(paceFactor() > 1 ? 'slower' : 'faster')+' pace)' : '') : '')+'</span><span>'+(s.r.zone?'No line':s.r.show?'Arrive early <b>'+earlyOf(s.r)+'</b> min':'Wait <b>~'+round5(s.wait)+'</b> min')+'</span><span>'+(s.r.zone?'Walk-through':s.r.meal?'Meal':s.r.show?'Show':(s.r.house||(s.r.extra&&eventOn()))?'Inside':'Ride')+' <b>'+s.r.dur+'</b> min</span><span>Out by <b>'+fmtShort(s.end)+'</b></span></div>'+
       (s.afterClose && !s.showAt ? '<div class="meta"><span class="pill live">In line before close</span><span>Get in line by <b>'+fmtShort(LINE_BY)+'</b>; you\'ll ride after closing</span></div>' : '')+
       (s.showAt ? '<div class="meta"><span class="pill must">'+(s.r.meal ? 'Reservation ' : 'Show ')+fmtShort(s.showAt)+'</span><span>Be there by <b>'+fmtShort(dueAt(s))+'</b>'+(s.r.meal ? '' : ' for a good spot')+'</span><span>Leave by <b>'+fmtShort(leaveAt(s))+'</b></span></div>'+
         (isLate || /claude|anthropic/i.test(location.hostname) ? '' : '<div class="tools"><button class="chipbtn" type="button" data-ics="'+s.r.id+'" data-at="'+s.showAt+'" data-leave="'+leaveAt(s)+'">Add to calendar with reminder</button></div>') : '')+
@@ -1970,7 +1973,8 @@ function renderRoute(){
       '<p class="hint" style="margin:0">'+autoLine+'</p>'+paceRouteLine()+alertsLine()+
     '</section>'+
     (GEO[S.park] && fit.length ? mapSection() + dirLink + '</section>' : '')+
-    '<section class="block"><span class="label">Your route from '+esc(fit[0] && fit[0].inLineNow ? fit[0].r.name : P.fromHere ? 'where you are' : (S.loc[S.park]||park().lands[0]))+'</span><ol class="steps">'+fit.map((s,i)=>step(s,i,false)).join("")+'</ol></section>'+
+    '<section class="block"><span class="label">Your route from '+(fit[0] && fit[0].inLineNow ? esc(fit[0].r.name) : P.fromHere ? 'where you are (GPS)' : startPicker())+'</span>'+
+      (!P.fromHere && !(fit[0] && fit[0].inLineNow) ? '<p class="hint" style="margin:0 0 6px">Walk times start from this area. If you\'re somewhere else, pick it here, or turn on Use my location on the Plan tab.</p>' : '')+'<ol class="steps">'+fit.map((s,i)=>step(s,i,false)).join("")+'</ol></section>'+
     (late.length ? '<section class="block late"><span class="label">Won\'t fit by '+fmt(P.deadline)+'</span><ol class="steps">'+late.map((s,i)=>step(s,i,true)).join("")+'</ol></section>' : '')+
     (passed.length ? '<section class="block late"><span class="label">'+(passed.every(s => s.r.meal) ? 'Earlier reservations' : 'Already started')+'</span><ol class="steps">'+passed.map((s,i)=>step(s,i,true)).join("")+'</ol></section>' : '')+
     closedHtml(P.closed)+
@@ -2091,7 +2095,7 @@ function routeGeom(P){
     }
     curPos = pos; curLand = x.r.land;
   });
-  return {legs, stops, start, me, real: !!g};
+  return {legs, stops, start, me, real: !!g, approx: legs.some(l => l.approx)};
 }
 const stopLabel = st => st.nums.length > 3 ? st.nums[0]+"–"+st.nums[st.nums.length-1] : st.nums.join(",");
 function mapSvg(P){
@@ -2126,7 +2130,9 @@ function mapSvg(P){
     o.push('<circle cx="'+f(h[0])+'" cy="'+f(h[1])+'" r="'+f(u*10)+'" fill="var(--water)"/>');
     p.lands.forEach(l => { if (l !== p.hub) o.push(line([h, L[l]], 'stroke="var(--line)" stroke-width="'+f(u*2.2)+'"')); });
   }
-  rg.legs.forEach((leg, i) => o.push(line(leg.map(proj), i === 0
+  rg.legs.forEach((leg, i) => o.push(line(leg.map(proj), leg.approx
+      ? 'stroke="var(--accent)" stroke-opacity=".75" stroke-width="'+f(u*(i === 0 ? 1.2 : .8))+'" stroke-dasharray="'+f(u*.4)+' '+f(u*1.2)+'"'
+      : i === 0
       ? 'stroke="var(--accent)" stroke-width="'+f(u*1.5)+'"'
       : 'stroke="var(--accent)" stroke-opacity=".5" stroke-width="'+f(u*1.0)+'" stroke-dasharray="'+f(u*1.8)+' '+f(u*1.6)+'"')));
   const fs = u*2.7;
@@ -2172,6 +2178,7 @@ function mapSection(){
   return '<section class="block"><div class="maphead"><span class="label" style="flex:1">Route map</span><div class="seg mini" id="mapSeg" role="group" aria-label="Map style">'+btn("draw","Drawing")+btn("street","Street")+btn("sat","Satellite")+'</div></div>'+
     (tilesBlocked ? '<div class="banner"><b>Street and satellite maps work in the installed app.</b><span>This page isn\'t allowed to load map images, so it shows the drawing instead. Live waits and your location also need the installed app.</span></div>' : '')+
     '<div class="mapcard" id="mapBox"></div>'+
+    (lastPlan && routeGeom(lastPlan).approx ? '<p class="hint" style="margin:0">Dotted legs: the park map is missing walkways there, so the time uses the direct distance. Follow the nearest path in that direction.</p>' : '')+
     mapStatusHtml()+
     (m !== "draw" ? '<div class="tools"><button class="chipbtn" type="button" id="pinEdit" aria-pressed="'+pinEdit+'">'+(pinEdit ? "Done moving pins" : "Move area pins")+'</button>'+(hasCalib ? '<button class="chipbtn" type="button" id="pinReset">Reset pins</button>' : '')+'</div>'+
       (pinEdit ? '<p class="hint" style="margin:0">Drag each area\'s pin to where it really is. Your phone saves the new spots and uses them for location and the map.</p>' : '') : '');
@@ -2205,7 +2212,7 @@ async function mountMap(P){
   else m.fitBounds(allLands().map(l => landPoint(S.park, l)).filter(Boolean), {padding:[30,30]});
   m.on("moveend", () => { lview = {park:S.park, c:m.getCenter(), z:m.getZoom()}; });
   const rg = routeGeom(P);
-  rg.legs.forEach((ll, i) => Lf.polyline(ll, i === 0 ? {color:accent, weight:6, opacity:.95} : {color:accent, weight:4, opacity:.7, dashArray:"8 9"}).addTo(m));
+  rg.legs.forEach((ll, i) => Lf.polyline(ll, ll.approx ? {color:accent, weight:i === 0 ? 5 : 3, opacity:.85, dashArray:"2 9"} : i === 0 ? {color:accent, weight:6, opacity:.95} : {color:accent, weight:4, opacity:.7, dashArray:"8 9"}).addTo(m));
   allLands().forEach(l => {
     const q = landPoint(S.park, l); if (!q) return;
     const mk = Lf.marker(q, {icon:Lf.divIcon({className:"qc-pin"+(pinEdit?" drag":""), html:'<div><i></i><span>'+esc(l)+'</span></div>', iconSize:null}), draggable:pinEdit, keyboard:false}).addTo(m);
@@ -2384,7 +2391,7 @@ function startPass(id){
   else { const c = currentWait(r); ret = now + (c && c.wait != null ? c.wait : waitAt(r, now, now)); }
   A[id] = {ret: hhmm(Math.ceil(ret / 5) * 5), day: nightId(), at: Date.now()};
   const sl = S.sel[k] = S.sel[k] || []; if (!sl.includes(id)) sl.push(id);
-  if (il) S.inLine = null;
+  if (il){ S.inLine = null; if (r.land && r.land !== "?") S.loc[S.park] = r.land; }   // you're standing at that ride
   persist();
 }
 function adjustReturn(id, d){ const a = aqaOf(id); if (!a) return; a.ret = hhmm(toMin(a.ret || hhmm(nowT())) + d); persist(); }
@@ -2466,6 +2473,12 @@ document.addEventListener("click", e => {
   else if (d.passoff){ if (S.aqa && S.aqa[K()]) delete S.aqa[K()][d.passoff]; persist(); refresh(); }
   else if (d.passdone){ const id = d.passdone, dn = S.done[K()] = S.done[K()] || {}; dn[id] = true; if (S.aqa && S.aqa[K()]) delete S.aqa[K()][id];
     const r = allRides().find(x => x.id === id); if (r && r.land !== "?") S.loc[S.park] = r.land; S.startMode = "now"; persist(); renderRides(); if (tab === "route") buildRoute(false, true); }
+});
+$("routeBody").addEventListener("change", e => {
+  if (e.target.id !== "routeLoc") return;
+  S.loc[S.park] = e.target.value; S.startMode = "now"; persist();
+  if ($("loc")) $("loc").value = e.target.value;
+  e.target.blur(); buildRoute();
 });
 $("buildBtn").onclick = () => { if (S.plan && S.plan.key === K()) S.plan = null; setTab("route"); };
 $("tabPlan").onclick = () => setTab("plan");
@@ -2697,16 +2710,52 @@ function osmSssp(g, s){
   g.sp.set(s, r);
   return r;
 }
+/* OpenStreetMap is missing walkways in places (around World Expo, for one), so a spot can snap to a path
+   100+ m away and the route then loops around. When an end is far from any mapped path and the routed walk
+   is much longer than the direct line, use the direct line plus 35% instead, unless it crosses the lagoon
+   or goes from one park into another. */
+function osmWet(g, A, B){
+  osmBlocked(g, A, A);   // builds g.obs
+  const L = meters(A, B), n = Math.max(2, Math.ceil(L / 3));
+  for (const ob of g.obs){
+    if (!ob.w) continue;
+    let wet = 0;
+    for (let i = 1; i < n; i++){ const f = i / n; if (inPoly([A[0] + (B[0]-A[0])*f, A[1] + (B[1]-A[1])*f], ob.r)) wet += L / n; }
+    if (wet > 12) return true;
+  }
+  return false;
+}
+function osmShortcut(g, a, b, sa, sb, routed){
+  const straight = meters(a, b), direct = straight * 1.35;
+  if (straight > 600 || (sa.d <= 50 && sb.d <= 50)) return null;
+  if (routed != null && routed <= direct * 1.5) return null;
+  const key = a[0].toFixed(5)+","+a[1].toFixed(5)+"|"+b[0].toFixed(5)+","+b[1].toFixed(5);
+  const sc = g.scCache || (g.scCache = new Map());
+  if (sc.has(key)) return sc.get(key) ? direct : null;
+  const ok = !(g.parkRings && (r => r(a) !== r(b))(p => g.parkRings.findIndex(q => inPoly(p, q)))) && !osmWet(g, a, b);
+  sc.set(key, ok);
+  return ok ? direct : null;
+}
 /* walking distance in metres along paths, or null if either end is off the path network */
 function osmDist(g, a, b){
+  const key = a[0].toFixed(5)+","+a[1].toFixed(5)+">"+b[0].toFixed(5)+","+b[1].toFixed(5);
+  const dc = g.distCache || (g.distCache = new Map());
+  if (dc.has(key)) return dc.get(key);
+  const res = osmDistCalc(g, a, b);
+  if (dc.size > 20000) dc.clear();
+  dc.set(key, res); return res;
+}
+function osmDistCalc(g, a, b){
   const ends = osmEnds(g, a, b); if (!ends) return null;
   const [sa, sb] = ends;
-  const d = osmSssp(g, sa.v).dist[sb.v];
-  return isFinite(d) ? d + sa.d + sb.d : null;
+  const d = osmSssp(g, sa.v).dist[sb.v], routed = isFinite(d) ? d + sa.d + sb.d : null;
+  const sc = osmShortcut(g, a, b, sa, sb, routed);
+  return sc != null ? sc : routed;
 }
 function osmPath(g, a, b){
   const ends = osmEnds(g, a, b); if (!ends) return null;
   const [sa, sb] = ends;
+  { const d0 = osmSssp(g, sa.v).dist[sb.v]; if (osmShortcut(g, a, b, sa, sb, isFinite(d0) ? d0 + sa.d + sb.d : null) != null) return Object.assign([a, b], {approx:true}); }
   const {dist, prev} = osmSssp(g, sa.v);
   if (!isFinite(dist[sb.v])) return null;
   const out = [b];
@@ -2849,15 +2898,18 @@ function onFix(pos){
 /* Measures walking speed from GPS: every 30-180 s window with good accuracy where you moved 20 m+
    at a walking speed counts. Standing still (in line, on a ride) is skipped. Recent walking counts most. */
 let paceAnchor = null;
+/* Only real walking counts: not while you're in a line, and only at walking speeds (about 0.7 m/s and up).
+   Shuffling through a queue or a house, and GPS drift while standing still, used to count as very slow
+   walking and could double every walk time. */
 function samplePace(pt, acc){
-  if (acc > 25) return;
+  if (acc > 20 || (S.inLine && S.inLine.key === K())) { paceAnchor = null; return; }
   const now = Date.now();
   if (!paceAnchor){ paceAnchor = {pt, at:now}; return; }
   const dt = (now - paceAnchor.at)/1000;
   if (dt < 30) return;
   const d = meters(paceAnchor.pt, pt), v = d / dt;
   paceAnchor = {pt, at:now};
-  if (dt > 180 || d < 20 || v < 0.3 || v > 2.5) return;
+  if (dt > 180 || d < 25 || v < 0.7 || v > 2.5) return;
   const pc = S.pace = Object.assign({mode:"normal", speed:0, minutes:0}, S.pace);
   const m = Math.min(pc.minutes, 60), dm = dt/60;
   pc.speed = pc.speed ? (pc.speed*m + v*60*dm)/(m + dm) : v*60;
