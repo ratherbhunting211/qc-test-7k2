@@ -2287,7 +2287,7 @@ function gpsLine(t, ask){
     el.hidden = false;
     el.innerHTML = 'Your location looks closer to <b>'+esc(PARKS[ask.park].name)+'</b>. <button type="button" class="chipbtn" id="switchPark">Switch to '+esc(PARKS[ask.park].short)+'</button> <button type="button" class="chipbtn" id="stayPark">Stay on '+esc(park().short)+'</button>';
     $("switchPark").onclick = () => { S.park = ask.park; parkPickedAt = Date.now(); save("parkPickedAt", parkPickedAt); persist(); renderAll(); refreshLive(); ensureOSM(S.park); gpsLine("Switched. Finding your area…"); };
-    $("stayPark").onclick = () => { parkPickedAt = Date.now(); save("parkPickedAt", parkPickedAt); gpsLine("Staying on "+park().name+". It won't ask again for 30 minutes."); };
+    $("stayPark").onclick = () => { save("parkStayDay", new Date().toDateString()); gpsLine("Staying on "+park().name+" for the rest of today."); };
     return;
   }
   el.hidden = !t; el.textContent = t || "";
@@ -2297,7 +2297,7 @@ function gpsLine(t, ask){
 function detectPark(pt){
   let best = null, bd = Infinity;
   for (const pid in osmRidePt) for (const id in osmRidePt[pid]){ const d = meters(pt, osmRidePt[pid][id]); if (d < bd){ bd = d; best = pid; } }
-  if (best && bd < 300) return {park:best, sure:true, d:bd};
+  if (best && bd < 120) return {park:best, sure:true, d:bd};
   let cp = null, cd = Infinity;
   for (const k in GEO){ const d = meters(pt, parkCenter(k)); if (d < cd){ cd = d; cp = k; } }
   const cur = meters(pt, parkCenter(S.park));
@@ -2316,9 +2316,13 @@ function onFix(pos){
   const det = detectPark(pt);
   if (det.d > 1500){ gpsLine("You're about "+(det.d/1609).toFixed(1)+" mi from the nearest park, so your location isn't changing the plan yet."); return; }
   if (det.park !== S.park){
-    // switch by itself only when a real ride is right next to you and you haven't just picked a park yourself
-    if (det.sure && Date.now() - parkPickedAt > 30*60000){ S.park = det.park; persist(); renderAll(); refreshLive(); ensureOSM(S.park); }
-    else { parkAsk = det.park; gpsLine("", det); return; }
+    // Never switch parks by itself (the two Universal parks are only a few hundred metres apart).
+    // Ask only when you're clearly beside a ride in the other park, not on an event night, and you
+    // haven't already said "Stay" today.
+    const today = new Date().toDateString();
+    if (det.sure && !eventOn() && load("parkStayDay", "") !== today){ parkAsk = det.park; gpsLine("", det); }
+    else gpsLine("Using "+park().name+". Pick a different park at the top if you've moved.");
+    return;
   }
   parkAsk = null;
   let land = null, ld = Infinity;
