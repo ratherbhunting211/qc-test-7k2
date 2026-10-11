@@ -1437,23 +1437,50 @@ function startTime(){
 let LINE_BY = null;
 function simulate(order, t0, loc0, now, deadline){
   let t = t0, loc = loc0; const steps = [];
-  for (const r of order){
+  /* Dining reservations are anchors, not stops that can be missed: before each stop, if doing it would
+     make you late for the next reservation, go to dinner first. A reservation is only ever left out
+     if its whole time is already over (shown as "time has passed", never as "won't fit"). */
+  const meals = order.filter(r => r.meal).map(r => ({r, at: showTimes(r)[0]})).filter(m => m.at != null).sort((x, y) => x.at - y.at);
+  const items = order.filter(r => !r.meal);
+  const pending = [];
+  for (const m of meals){
+    if (m.at + m.r.dur < t0) steps.push({r:m.r, walk:0, arrive:m.at, hold:0, wait:0, showAt:m.at, end:m.at + m.r.dur, fits:false, passed:true});
+    else pending.push(m);
+  }
+  const doMeal = m => {
+    const wk = walk(loc, m.r), E = earlyOf(m.r), arrive = t + wk, due = m.at - E;
+    const hold = Math.max(0, due - arrive), lateBy = Math.max(0, Math.round(arrive - due));
+    const end = Math.max(m.at, arrive) + m.r.dur;
+    steps.push({r:m.r, walk:wk, arrive, hold, showAt:m.at, wait:E, end, fits:true, lateBy});
+    t = end; loc = m.r;
+  };
+  const stepFor = (r, t, loc) => {
     const wk = walk(loc, r); t += wk;
     const times = showTimes(r);
-    if (times.length){   // be there SHOW_EARLY (30) minutes before the next showtime you can make
-      const E = (r.early != null ? r.early : SHOW_EARLY), st = times.find(x => x - E >= t);
-      if (st == null){ steps.push({r, walk:wk, arrive:t, hold:0, wait:0, end:t, fits:false, noShow:true}); t -= wk; continue; }
-      const arrive = t, hold = st - E - t; t = st + r.dur;
-      const okShow = t <= deadline || (LINE_BY != null && st <= LINE_BY + 1);
-      steps.push({r, walk:wk, arrive, hold, showAt:st, wait:E, end:t, fits: okShow, afterClose: okShow && t > deadline});
-      loc = r; continue;
+    if (times.length){   // be there early enough before the next showtime you can make
+      const E = earlyOf(r), st = times.find(x => x - E >= t);
+      if (st == null) return {step:{r, walk:wk, arrive:t, hold:0, wait:0, end:t - wk, fits:false, noShow:true}, t:t - wk, skip:true};
+      const arrive = t, hold = st - E - t, end = st + r.dur;
+      const ok = end <= deadline || (LINE_BY != null && st <= LINE_BY + 1);
+      return {step:{r, walk:wk, arrive, hold, showAt:st, wait:E, end, fits:ok, afterClose: ok && end > deadline}, t:end};
     }
     const arrive = t, op = opensAt(r), hold = op != null && t < op ? op - t : 0; t += hold;
     const inLine = t, w = waitAt(r, t, now); t += w + r.dur;
     const ok = t <= deadline || (LINE_BY != null && inLine <= LINE_BY);
-    steps.push({r, walk:wk, arrive, hold, opens:op, wait:w, end:t, inLine, fits: ok, afterClose: ok && t > deadline});
-    loc = r;
+    return {step:{r, walk:wk, arrive, hold, opens:op, wait:w, end:t, inLine, fits:ok, afterClose: ok && t > deadline}, t};
+  };
+  for (const r of items){
+    let s1 = stepFor(r, t, loc);
+    while (pending.length && !s1.skip){
+      const m = pending[0];
+      if (s1.t + walk(r, m.r) <= m.at - earlyOf(m.r)) break;   // fits before dinner
+      doMeal(pending.shift());
+      s1 = stepFor(r, t, loc);
+    }
+    steps.push(s1.step);
+    if (!s1.skip){ t = s1.t; loc = r; }
   }
+  while (pending.length) doMeal(pending.shift());
   return steps;
 }
 /* Fit the most (must-dos count most), finish earliest, and among equals do things sooner and
@@ -1728,7 +1755,7 @@ function renderRides(){
 function renderRoute(){
   const P = lastPlan, body = $("routeBody");
   if (!P){ body.innerHTML = '<div class="empty"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.5 18H15a3 3 0 000-6H9a3 3 0 010-6h6.5"/></svg><span>Pick your rides on the Plan tab, then tap <b>Build my route</b>.</span></div>'; return; }
-  const fit = P.steps.filter(s => s.fits), late = P.steps.filter(s => !s.fits);
+  const fit = P.steps.filter(s => s.fits), late = P.steps.filter(s => !s.fits && !s.passed), passed = P.steps.filter(s => s.passed);
   if (!P.steps.length){
     body.innerHTML = '<div class="empty">'+(P.doneCount ? "You've finished everything you picked. Nice work." : "No rides selected yet. Pick some on the Plan tab.")+'</div>' + closedHtml(P.closed);
     return;
@@ -1739,7 +1766,7 @@ function renderRoute(){
   const allEnd = P.steps[P.steps.length-1].end;
   const saved = Math.round(naiveEnd - allEnd);
   const must = S.must[K()] || {}, lowR = (S.low || {})[K()] || {};
-  const lateMain = late.filter(s => !lowR[s.r.id]), lateLow = late.length - lateMain.length;
+  const lateMain = late.filter(s => !lowR[s.r.id] && !s.passed), lateLow = late.filter(s => lowR[s.r.id]).length;
   const verdict = lateMain.length
     ? '<div class="verdict no">'+lateMain.length+' of '+P.steps.length+' won\'t fit before '+fmt(P.deadline)+'. Drop a few, mark must-dos with ★ or extras as If time, or push your finish time later.</div>'
     : '<div class="verdict ok">'+(lateLow ? 'All your main picks fit. '+lateLow+' "if time" pick'+(lateLow>1?'s':'')+' won\'t fit '+(eventOn() ? 'tonight' : 'today')+', and that\'s okay.' : 'Everything fits.')+' You should finish around '+fmt(finish)+', with '+Math.max(0,Math.round(P.deadline-finish))+' min to spare.</div>';
@@ -1754,12 +1781,14 @@ function renderRoute(){
       (s.showAt ? '<div class="meta"><span class="pill must">'+(s.r.meal ? 'Reservation ' : 'Show ')+fmtShort(s.showAt)+'</span><span>Be there by <b>'+fmtShort(s.showAt-earlyOf(s.r))+'</b>'+(s.r.meal ? '' : ' for a good spot')+'</span><span>Leave by <b>'+fmtShort(leaveAt(s))+'</b></span></div>'+
         (isLate || /claude|anthropic/i.test(location.hostname) ? '' : '<div class="tools"><button class="chipbtn" type="button" data-ics="'+s.r.id+'" data-at="'+s.showAt+'" data-leave="'+leaveAt(s)+'">Add to calendar with reminder</button></div>') : '')+
       (s.noShow ? '<div class="meta"><span>No showtimes left that you can reach tonight</span></div>' : '')+
+      (s.passed ? '<div class="meta"><span>This reservation\'s time has passed. Tap Done if you\'ve eaten, or Remove it under Dining reservations.</span></div>' : '')+
+      (s.lateBy > 0 ? '<div class="verdict no"><span>Running about '+s.lateBy+' min late for '+esc(s.r.name)+'. Leave now, or call the restaurant.</span></div>' : '')+
       (s.hold > 0 && !s.showAt ? '<div class="meta"><span class="pill must">Opens '+fmtShort(s.opens)+'</span><span>You\'ll be there <b>'+Math.round(s.hold)+'</b> min before it opens</span></div>' : '')+
       (s.r.note && !s.r.show && !s.r.custom && !s.r.extra ? '<div class="hint">'+esc(s.r.note)+'</div>' : '')+
       (s.inLineNow ? '<div class="meta"><span class="pill live">In line</span><span>Since <b>'+fmtShort(s.arrive)+'</b> · expected off by <b>'+fmtShort(s.end)+'</b>'+(s.end > s.expEnd + 1 ? ' (running long)' : '')+'</span></div>' : '')+
       (s.askDown ? '<div class="verdict no" style="display:grid;gap:8px"><span>'+esc(s.r.name)+' is '+(s.downNow === "DOWN" ? 'temporarily down' : 'closed')+' while you\'re in line. Stay and wait, or leave and replan? Either way it stays on your list and comes back into your route when it reopens.</span><div class="actions"><button type="button" class="done" data-keepwait="'+s.r.id+'">Keep waiting</button><button type="button" data-leavedown="'+s.r.id+'">Leave line &amp; replan</button></div></div>' : '')+
       (s.inLineNow && s.downNow && !s.askDown ? '<div class="hint">Down right now. You chose to keep waiting.</div>' : '')+
-      (isLate ? '' : s.inLineNow
+      (isLate && !s.passed ? '' : s.inLineNow
         ? '<div class="actions"><button type="button" class="done" data-done="'+s.r.id+'">Done ✓</button><button type="button" data-leftline="'+s.r.id+'">Left the line</button></div>'
         : '<div class="actions">'+(i === 0 ? '<button type="button" data-inline="'+s.r.id+'">I\'m in line</button>' : '')+'<button type="button" class="done" data-done="'+s.r.id+'">Done ✓</button><button type="button" data-skip="'+s.r.id+'">Skip</button></div>')+
       '</div></li>';
@@ -1792,6 +1821,7 @@ function renderRoute(){
     (GEO[S.park] && fit.length ? mapSection() + dirLink + '</section>' : '')+
     '<section class="block"><span class="label">Your route from '+esc(S.loc[S.park]||park().lands[0])+'</span><ol class="steps">'+fit.map((s,i)=>step(s,i,false)).join("")+'</ol></section>'+
     (late.length ? '<section class="block late"><span class="label">Won\'t fit by '+fmt(P.deadline)+'</span><ol class="steps">'+late.map((s,i)=>step(s,i,true)).join("")+'</ol></section>' : '')+
+    (passed.length ? '<section class="block late"><span class="label">Earlier reservations</span><ol class="steps">'+passed.map((s,i)=>step(s,i,true)).join("")+'</ol></section>' : '')+
     closedHtml(P.closed)+
     '<p class="hint">Tap <b>Done</b> after each ride. The app moves you to that spot and re-plans the rest from the current time and latest waits. Map areas are approximate.</p>';
   if ($("mapBox")) mountMap(P);
