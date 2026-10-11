@@ -1308,11 +1308,13 @@ async function parkEntityId(pid){
   if (!cache[pid]) throw new Error("park not in feed");
   return cache[pid];
 }
-function matchRide(pid, name){
-  const n = norm(name);
+/* Feed shows only match our shows and feed rides only our rides, so "Meet the Transformers"
+   (a character meet) can't overwrite Transformers: The Ride. */
+function matchRide(pid, name, isShow){
+  const n = norm(name), same = r => !!r.show === !!isShow;
   const ev = (pid === S.park && eventOn()) ? PARKS[pid].eventRides : [];
-  return PARKS[pid].rides.concat(ev).find(r => r.kw.some(k => n.includes(k)))
-      || (S.custom[pid] || []).find(c => n && (n.includes(c.kw[0]) || c.kw[0].includes(n)));
+  return PARKS[pid].rides.concat(ev).find(r => same(r) && r.kw.some(k => n.includes(k)))
+      || (S.custom[pid] || []).find(c => same(c) && n && (n.includes(c.kw[0]) || c.kw[0].includes(n)));
 }
 async function fetchLive(pid){
   const p = PARKS[pid]; const out = {rides:{}, extras:[], at:Date.now()};
@@ -1341,11 +1343,12 @@ async function fetchLive(pid){
   samples[sk] = samples[sk] || {};
   out.source = source; out.raw = [];
   for (const x of list){
-    const r = matchRide(pid, x.name);
+    const r = matchRide(pid, x.name, x.show);
     out.raw.push({name:x.name, status:x.status||"OPERATING", wait:x.wait, show:x.show,
       used: r ? "Matched to "+r.name : (!x.show && (x.wait != null || eventOn())) ? "Added under More from the live feed" : x.show ? "Show listing, not used for routes" : "No wait posted, not used"});
     if (r){
-      out.rides[r.id] = {wait:x.wait, status:x.status||"OPERATING"};
+      const prev = out.rides[r.id];
+      if (!(prev && prev.wait != null && x.wait == null)) out.rides[r.id] = {wait:x.wait, status:x.status||"OPERATING"};
       if (x.wait != null && x.status === "OPERATING" && !r.show){
         const s = samples[sk][r.id] = samples[sk][r.id] || {};
         const c = s[h] = s[h] || [0,0]; c[0] += x.wait; c[1] += 1;
@@ -1577,12 +1580,17 @@ function renderHero(){
 }
 function waitChip(r){
   const c = currentWait(r), now = nowT();
+  const nextShow = showTimes(r).find(x => x >= now);
+  if (nextShow != null) return '<span class="wait"><b>'+fmtShort(nextShow).replace(/[ap]$/,'')+'</b><i>next show</i></span>';
+  if (r.show && showTimes(r).length) return '<span class="wait down"><b>—</b><i>done</i></span>';
+  if (c && c.status === "CLOSED" && opensAt(r) != null && opensAt(r) > now) return '<span class="wait"><b>'+fmtShort(opensAt(r)).replace(/[ap]$/,'')+'</b><i>opens '+(fmtShort(opensAt(r)).endsWith('a')?'am':'pm')+'</i></span>';
   if (c && c.status) return '<button type="button" class="wait down" data-edit="'+r.id+'" aria-label="Edit wait"><b>—</b><i>'+(c.status==="DOWN"?"Down":"Closed")+'</i></button>';
   if (r.zone) return '<span class="wait"><b>'+r.dur+'</b><i>min walk</i></span>';
   if (r.show) return '<button type="button" class="wait" data-edit="'+r.id+'" aria-label="Show"><b>'+r.dur+'</b><i>min show</i></button>';
   if (c) return '<button type="button" class="wait live'+lvl(c.wait)+'" data-edit="'+r.id+'" aria-label="Edit wait"><b>'+Math.round(c.wait)+'</b><i>'+(c.src==="you"?"posted":"live")+'</i></button>';
   const tw = round5(histWait(r, Math.max(now, T(toMin(hours().open)))));
-  return '<button type="button" class="wait'+lvl(tw)+'" data-edit="'+r.id+'" aria-label="Enter posted wait"><b>'+tw+'</b><i>typical</i></button>';
+  const L = live[S.park], unlisted = L && !liveFailed && !L.rides[r.id] && !r.custom && !r.extra && !r.show;
+  return '<button type="button" class="wait'+lvl(tw)+'" data-edit="'+r.id+'" aria-label="Enter posted wait"><b>'+tw+'</b><i>'+(unlisted ? 'not listed' : 'typical')+'</i></button>';
 }
 let editing = null;
 function renderRides(){
@@ -1599,7 +1607,8 @@ function renderRides(){
   const order = ["Horror Nights · set each area"].concat(allLands(), ["More from the live feed"]).filter(l => groups[l]);
   $("rideList").innerHTML = order.map(l => '<div class="land"><div class="lh">'+esc(l)+'</div>' + groups[l].map(r => {
     const on = sel.includes(r.id), isDone = !!done[r.id];
-    const sub = isDone ? "Done today" : (r.note || (r.show ? "" : r.dur+" min ride"));
+    const Lf = live[S.park], unl = Lf && !liveFailed && !Lf.rides[r.id] && !r.custom && !r.extra && !r.show && !r.hhn;
+    const sub = isDone ? "Done today" : unl ? "Not in Universal's live feed today, may be closed. Tap the wait sign to enter it." : (r.note || (r.show ? "" : r.dur+" min ride"));
     const timesIn = eventOn() && r.show && hasOpens(r) ? '<label class="opens">Show times <input type="text" data-times="'+r.id+'" value="'+esc(fmtTimes(((S.showtimes||{})[S.park]||{})[r.id] || r.times || []))+'" placeholder="e.g. 7p, 8:30p, 10p" aria-label="Show times for '+esc(r.name)+'" style="min-width:150px"></label>' : '';
     const opensIn = timesIn || eventOn() && hasOpens(r) ? timesIn || '<label class="opens">Opens <input type="time" data-opens="'+r.id+'" value="'+esc(opensStr(r))+'" aria-label="Opening time for '+esc(r.name)+'"></label>' : '';
     const areaSel = (r.custom || r.extra || r.hhn) ? '<select class="area" data-area="'+r.id+'" aria-label="Area for '+esc(r.name)+'">'+["?"].concat(allLands()).map(l => '<option value="'+esc(l)+'"'+(l===r.land?' selected':'')+'>'+(l==="?"?"Set its area…":esc(l))+'</option>').join("")+'</select>' : '';
