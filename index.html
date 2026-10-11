@@ -2006,12 +2006,16 @@ function osmCompact(data){
     else if (e.type === "relation" && e.members) for (const m of e.members) if (m.role !== "inner" && m.geometry) ring = ring.concat(m.geometry.map(g => [g.lat, g.lon]));
     if (ring.length > 3) parks.push({name:t.name || "", ring});
   }
+  // prefer the individual parks' outlines over the whole-resort outline (which takes in backstage areas)
+  const ours = parks.filter(p => /studios florida|islands of adventure|epic universe/i.test(p.name));
+  if (ours.length) parks.splice(0, parks.length, ...ours);
   const inside = pt => !parks.length || parks.some(p => inPoly(pt, p.ring));
   const getI = id => { let i = idx.get(id); if (i === undefined){ const p = pos.get(id); if (!p) return -1; i = lat.length; idx.set(id, i); lat.push(+p[0].toFixed(6)); lon.push(+p[1].toFixed(6)); } return i; };
   for (const e of data.elements || []){
     const t = e.tags || {};
     if (e.type === "way" && t.highway && e.nodes){
       if (/^(private|no)$/.test(t.access || "") || t.foot === "no") continue;
+      if (!/^(footway|pedestrian|path|steps|living_street|corridor)$/.test(t.highway) && !/^(yes|designated|permissive)$/.test(t.foot || "")) continue;   // guest paths only, no service roads
       if (!e.nodes.some(id => pos.has(id) && inside(pos.get(id)))) continue;
       for (let k = 1; k < e.nodes.length; k++){ const a = getI(e.nodes[k-1]), b = getI(e.nodes[k]); if (a >= 0 && b >= 0 && a !== b) edges.push(a, b); }
     } else if (t.name && (t.tourism === "attraction" || t.attraction)){
@@ -2019,9 +2023,29 @@ function osmCompact(data){
       if (c) attractions.push([t.name, +c[0].toFixed(6), +c[1].toFixed(6)]);
     }
   }
-  return {v:2, at:Date.now(), lat, lon, edges, attractions, parks:parks.map(p => p.name)};
+  return {v:3, at:Date.now(), lat, lon, edges, attractions, parks:parks.map(p => p.name)};
 }
 function osmHydrate(g){
+  /* OpenStreetMap often leaves small gaps where paths meet. Join pieces that come within 25 m of each other
+     (one link per pair of pieces), so a walk can continue across a gap instead of failing. */
+  const n0 = g.lat.length, par = new Int32Array(n0).map((_, i) => i);
+  const find = x => { while (par[x] !== x){ par[x] = par[par[x]]; x = par[x]; } return x; };
+  for (let k = 0; k < g.edges.length; k += 2){ const a = find(g.edges[k]), b = find(g.edges[k+1]); if (a !== b) par[a] = b; }
+  const cellOf = new Map();
+  for (let i = 0; i < n0; i++){ const key = osmCell(g.lat[i], g.lon[i]); let a = cellOf.get(key); if (!a) cellOf.set(key, a = []); a.push(i); }
+  const extra = [];
+  for (let i = 0; i < n0; i++){
+    const ci = Math.floor(g.lat[i] / OSM_CELL), cj = Math.floor(g.lon[i] / OSM_CELL);
+    for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++){
+      const a = cellOf.get((ci + di) + ":" + (cj + dj)); if (!a) continue;
+      for (const j of a){
+        if (j <= i) continue;
+        const ri = find(i), rj = find(j); if (ri === rj) continue;
+        if (meters([g.lat[i], g.lon[i]], [g.lat[j], g.lon[j]]) < 25){ extra.push(i, j); par[ri] = rj; }
+      }
+    }
+  }
+  g.edges = g.edges.concat(extra); g.bridges = extra.length / 2;
   const n = g.lat.length, off = new Int32Array(n + 1), E = g.edges;
   for (let k = 0; k < E.length; k++) off[E[k] + 1]++;
   for (let i = 0; i < n; i++) off[i + 1] += off[i];
@@ -2139,7 +2163,7 @@ async function ensureOSM(pid){
   const region = REGION[pid];
   if (osm[region] || osmState[region] === "loading") return;
   const cached = load("osm." + region, null);
-  if (cached && cached.v === 2 && Date.now() - cached.at < 30*864e5){
+  if (cached && cached.v === 3 && Date.now() - cached.at < 30*864e5){
     osm[region] = osmHydrate(cached); osmState[region] = "ready"; osmMatchRides(region); return;
   }
   osmState[region] = "loading";
