@@ -127,6 +127,8 @@ select,input[type=time],input[type=number],input[type=text]{width:100%;backgroun
 .rname span{font-weight:700;line-height:1.25;display:block}
 .rname small{color:var(--muted);font-size:.78rem}
 .rname .area{min-height:34px;padding:4px 8px;font-size:.82rem;margin-top:5px;max-width:230px;border-radius:9px}
+.rname .opens{display:flex;align-items:center;gap:6px;margin-top:5px;font-size:.78rem;font-weight:700;color:var(--muted)}
+.rname .opens input{min-height:32px;padding:3px 8px;width:auto;font-size:.82rem;border-radius:9px}
 .rname .rm{margin-top:5px;justify-self:start;padding:3px 10px;font-size:.78rem}
 .ride.off .rname span{color:var(--muted);text-decoration:line-through}
 .star{border:0;background:none;font-size:1.3rem;line-height:1;padding:6px;color:var(--line);transition:transform .15s}
@@ -992,6 +994,8 @@ const PARKS = {
        behind Minion Land, reached by Haunted House Access Path A (by the Universal Studios Store) or
        Path B (by Music Plaza). Other areas also come from the official app map; "?" means still unknown. */
     spurs: {"Soundstages": {via: "Production Central", extra: 4}},
+    /* opening times seen in the official app; the rest default to your event start and can be edited */
+    eventOpens: {h_jack: "14:00", h_evildead: "17:45"},
     eventRides: [
       ["h_stranger","Stranger Things 5","Soundstages",120,5,["strangerthings"],"Haunted house · Access Path A or B"],
       ["h_evildead","Evil Dead Burn","Soundstages",90,5,["evildead"],"Haunted house · Access Path A or B"],
@@ -1078,7 +1082,7 @@ const PARKS = {
 };
 for (const id in PARKS) {
   PARKS[id].rides = PARKS[id].rides.map(r => ({id:r[0],name:r[1],land:r[2],peak:r[3],dur:r[4],kw:r[5],note:r[6]||"",show:!!r[7],fixedWait:r[7]?15:null}));
-  PARKS[id].eventRides = (PARKS[id].eventRides || []).map(r => ({id:r[0],name:r[1],land:r[2],peak:r[3],dur:r[4],kw:r[5],note:r[6],
+  PARKS[id].eventRides = (PARKS[id].eventRides || []).map(r => ({id:r[0],name:r[1],land:r[2],peak:r[3],dur:r[4],kw:r[5],note:r[6],opens:(PARKS[id].eventOpens||{})[r[0]],
     hhn:true, house:r[7]!=="zone", zone:r[7]==="zone", show:false, fixedWait:r[7]==="zone"?0:null}));
 }
 
@@ -1121,7 +1125,7 @@ function save(k, v){ try { localStorage.setItem("qc."+k, JSON.stringify(v)); } c
 const S = Object.assign({
   park: "usf", loc: {}, startMode: "now", start: "09:00", end: {}, crowd: 1,
   sel: {}, must: {}, done: {}, overrides: {},
-  event: {}, custom: {}, extraLand: {}, calib: {}, seen: {}, gps: false, pace: {mode:"normal", speed:0, minutes:0}, evHours: {}
+  event: {}, custom: {}, extraLand: {}, calib: {}, seen: {}, gps: false, pace: {mode:"normal", speed:0, minutes:0}, evHours: {}, opens: {}
 }, load("state", {}));
 let samples = load("samples", {});          // park -> ride -> hour -> [sum,count]
 const live = {};                             // park -> {rides:{id:{wait,status}}, extras:[], at}
@@ -1133,7 +1137,7 @@ if (!S.evHours.usf){   // your Horror Nights ticket: 2 PM to 2 AM
   if (!S.end.usf_hhn || S.end.usf_hhn === "01:00") S.end.usf_hhn = "02:00";
 }
 function persist(){ save("state", {park:S.park,loc:S.loc,startMode:S.startMode,start:S.start,end:S.end,crowd:S.crowd,sel:S.sel,must:S.must,done:S.done,overrides:S.overrides,
-  event:S.event,evHours:S.evHours,custom:S.custom,pace:S.pace,mapMode:S.mapMode,extraLand:S.extraLand,calib:S.calib,seen:S.seen,gps:S.gps}); }
+  event:S.event,evHours:S.evHours,opens:S.opens,custom:S.custom,pace:S.pace,mapMode:S.mapMode,extraLand:S.extraLand,calib:S.calib,seen:S.seen,gps:S.gps}); }
 
 /* ---------- Helpers ---------- */
 const $ = id => document.getElementById(id);
@@ -1244,7 +1248,17 @@ function waitAt(r, t, now){
   const w = Math.exp(-Math.max(0, t-now)/150);   // live reading fades toward history over ~2.5 h
   return Math.max(0, h * (1 + (ratio-1)*w));
 }
-function unavailable(r){ const c = currentWait(r); return c && c.status ? c.status : null; }
+/* When an event item opens: your edit, else the official time we know, else your event start. */
+const hasOpens = r => r.hhn || (r.custom && r.event) || (r.extra && eventOn());
+function opensStr(r){ return ((S.opens || {})[S.park] || {})[r.id] || r.opens || (hasOpens(r) ? hours().open : null); }
+function opensAt(r){ const o = hasOpens(r) && opensStr(r); return o ? T(toMin(o)) : null; }
+function unavailable(r){
+  const c = currentWait(r);
+  if (!c || !c.status) return null;
+  const op = opensAt(r);
+  if (c.status === "CLOSED" && op != null && op > nowT()) return null;   // not open yet, not closed for the night
+  return c.status;
+}
 
 /* ---------- Live data ---------- */
 async function getJSON(url){
@@ -1335,8 +1349,9 @@ function simulate(order, t0, loc0, now, deadline){
   let t = t0, loc = loc0; const steps = [];
   for (const r of order){
     const wk = walk(loc, r); t += wk;
-    const arrive = t; const w = waitAt(r, t, now); t += w + r.dur;
-    steps.push({r, walk:wk, arrive, wait:w, end:t, fits: t <= deadline});
+    const arrive = t, op = opensAt(r), hold = op != null && t < op ? op - t : 0; t += hold;
+    const w = waitAt(r, t, now); t += w + r.dur;
+    steps.push({r, walk:wk, arrive, hold, opens:op, wait:w, end:t, fits: t <= deadline});
     loc = r;
   }
   return steps;
@@ -1353,11 +1368,11 @@ function optimize(rides, t0, loc0, now, deadline, must){
   const greedy = (rand) => {
     const left = rides.slice(), out = []; let t = t0, loc = loc0;
     while (left.length){
-      const c = left.map(r => { const wk = walk(loc, r); return {r, cost: wk + waitAt(r, t+wk, now) + r.dur - (must[r.id] ? 5 : 0)}; })
+      const c = left.map(r => { const wk = walk(loc, r), op = opensAt(r), at = Math.max(t + wk, op || 0); return {r, cost: (at - t) + waitAt(r, at, now) + r.dur - (must[r.id] ? 5 : 0)}; })
                     .sort((a,b) => a.cost-b.cost);
       const pick = c[rand ? Math.floor(Math.random()*Math.min(3,c.length)) : 0];
       out.push(pick.r); left.splice(left.indexOf(pick.r),1);
-      const wk = walk(loc, pick.r); t += wk + waitAt(pick.r, t+wk, now) + pick.r.dur; loc = pick.r;
+      const wk = walk(loc, pick.r), op = opensAt(pick.r), at = Math.max(t + wk, op || 0); t = at + waitAt(pick.r, at, now) + pick.r.dur; loc = pick.r;
     }
     return out;
   };
@@ -1521,11 +1536,12 @@ function renderRides(){
   $("rideList").innerHTML = order.map(l => '<div class="land"><div class="lh">'+esc(l)+'</div>' + groups[l].map(r => {
     const on = sel.includes(r.id), isDone = !!done[r.id];
     const sub = isDone ? "Done today" : (r.note || (r.show ? "" : r.dur+" min ride"));
+    const opensIn = eventOn() && hasOpens(r) ? '<label class="opens">Opens <input type="time" data-opens="'+r.id+'" value="'+esc(opensStr(r))+'" aria-label="Opening time for '+esc(r.name)+'"></label>' : '';
     const areaSel = (r.custom || r.extra || r.hhn) ? '<select class="area" data-area="'+r.id+'" aria-label="Area for '+esc(r.name)+'">'+["?"].concat(allLands()).map(l => '<option value="'+esc(l)+'"'+(l===r.land?' selected':'')+'>'+(l==="?"?"Set its area…":esc(l))+'</option>').join("")+'</select>' : '';
     const rm = r.custom ? '<button type="button" class="chipbtn rm" data-remove="'+r.id+'">Remove</button>' : '';
     return '<div class="ride'+(isDone?" off":"")+'">'+
       '<input type="checkbox" id="c_'+r.id+'" data-sel="'+r.id+'"'+(on?" checked":"")+'>'+
-      '<div class="rname"><label for="c_'+r.id+'"><span>'+esc(r.name)+'</span></label><small>'+esc(sub)+'</small>'+areaSel+rm+'</div>'+
+      '<div class="rname"><label for="c_'+r.id+'"><span>'+esc(r.name)+'</span></label><small>'+esc(sub)+'</small>'+opensIn+areaSel+rm+'</div>'+
       '<button type="button" class="star" data-must="'+r.id+'" aria-pressed="'+(!!must[r.id])+'" aria-label="Must-do">★</button>'+
       waitChip(r)+
       (editing===r.id ? '<div class="editwait"><input type="number" inputmode="numeric" min="0" max="300" id="ew_'+r.id+'" placeholder="Minutes"><button class="chipbtn" type="button" data-savewait="'+r.id+'">Save</button><button class="chipbtn" type="button" data-clearwait="'+r.id+'">Clear</button></div>' : '')+
@@ -1557,6 +1573,7 @@ function renderRoute(){
       '<h3>'+esc(s.r.name)+'</h3>'+
       '<div class="meta"><span>'+esc(s.r.land==="?"?"Location unknown":s.r.land)+'</span>'+(must[s.r.id]?'<span class="pill must">Must-do</span>':'')+src+'</div>'+
       '<div class="meta"><span>Walk <b>'+s.walk+'</b> min'+(i===0 && !isLate && P.fromHere ? ' from you' : '')+'</span><span>'+(s.r.zone?'No line':s.r.show?'Arrive early <b>15</b> min':'Wait <b>~'+round5(s.wait)+'</b> min')+'</span><span>'+(s.r.zone?'Walk-through':s.r.show?'Show':(s.r.house||(s.r.extra&&eventOn()))?'Inside':'Ride')+' <b>'+s.r.dur+'</b> min</span><span>Out by <b>'+fmtShort(s.end)+'</b></span></div>'+
+      (s.hold > 0 ? '<div class="meta"><span class="pill must">Opens '+fmtShort(s.opens)+'</span><span>You\'ll be there <b>'+Math.round(s.hold)+'</b> min before it opens</span></div>' : '')+
       (s.r.note && !s.r.show && !s.r.custom && !s.r.extra ? '<div class="hint">'+esc(s.r.note)+'</div>' : '')+
       (isLate ? '' : '<div class="actions"><button type="button" class="done" data-done="'+s.r.id+'">Done ✓</button><button type="button" data-skip="'+s.r.id+'">Skip</button></div>')+
       '</div></li>';
@@ -1828,6 +1845,8 @@ $("selAll").onclick = () => { S.sel[K()] = allRides().map(r=>r.id); persist(); r
 $("selNone").onclick = () => { S.sel[K()] = []; persist(); renderRides(); };
 $("resetDay").onclick = () => { S.done[K()] = {}; persist(); renderRides(); };
 $("rideList").addEventListener("change", e => {
+  const oid = e.target.dataset.opens;
+  if (oid){ if (e.target.value){ ((S.opens = S.opens || {})[S.park] = S.opens[S.park] || {})[oid] = e.target.value; persist(); } return; }
   const aid = e.target.dataset.area;
   if (aid){
     const c = (S.custom[S.park]||[]).find(x => x.id === aid);
