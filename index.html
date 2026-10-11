@@ -1288,10 +1288,14 @@ function unavailable(r){
 }
 
 /* ---------- Live data ---------- */
-async function getJSON(url){
-  const ctl = new AbortController(); const tm = setTimeout(()=>ctl.abort(), 9000);
-  try { const r = await fetch(url, {signal:ctl.signal}); if (!r.ok) throw new Error(r.status); return await r.json(); }
+async function getJSON(url, ms){
+  const ctl = new AbortController(); const tm = setTimeout(()=>ctl.abort(), ms || 20000);
+  let r;
+  try { r = await fetch(url, {signal:ctl.signal, cache:"no-store"}); }
+  catch(e){ throw new Error(e.name === "AbortError" ? "it took too long to answer (weak signal?)" : "your phone couldn't connect to it (no signal, or blocked)"); }
   finally { clearTimeout(tm); }
+  if (!r.ok) throw new Error("it answered with error "+r.status+(r.status === 429 ? " (too many requests, try again in a minute)" : ""));
+  try { return await r.json(); } catch(e){ throw new Error("it sent back something unreadable"); }
 }
 async function parkEntityId(pid){
   const cache = load("ids", {});
@@ -1312,18 +1316,26 @@ function matchRide(pid, name){
 }
 async function fetchLive(pid){
   const p = PARKS[pid]; const out = {rides:{}, extras:[], at:Date.now()};
-  let list = [], source = "ThemeParks.wiki";
-  try {
-    const id = await parkEntityId(pid);
-    const d = await getJSON("https://api.themeparks.wiki/v1/entity/"+id+"/live");
-    list = (d.liveData||[]).filter(x => x.entityType === "ATTRACTION" || x.entityType === "SHOW")
-      .map(x => ({name:x.name, status:x.status, wait: x.queue && x.queue.STANDBY ? x.queue.STANDBY.waitTime : null, show:x.entityType==="SHOW"}));
-  } catch(e){
-    source = "queue-times.com";
-    const d = await getJSON("https://queue-times.com/parks/"+p.qtId+"/queue_times.json");
-    const rides = (d.rides||[]).concat(...(d.lands||[]).map(l => l.rides||[]));
-    list = rides.map(x => ({name:x.name, status:x.is_open?"OPERATING":"CLOSED", wait:x.wait_time, show:false}));
+  let list = [], source = "ThemeParks.wiki", firstErr = null;
+  for (let attempt = 0; attempt < 2 && !list.length; attempt++){
+    try {
+      if (attempt) { const c = load("ids", {}); delete c[pid]; save("ids", c); }   // second try: look the park up again
+      const id = await parkEntityId(pid);
+      const d = await getJSON("https://api.themeparks.wiki/v1/entity/"+id+"/live");
+      list = (d.liveData||[]).filter(x => x.entityType === "ATTRACTION" || x.entityType === "SHOW")
+        .map(x => ({name:x.name, status:x.status, wait: x.queue && x.queue.STANDBY ? x.queue.STANDBY.waitTime : null, show:x.entityType==="SHOW"}));
+      if (!list.length) throw new Error("it listed no rides");
+    } catch(e){ firstErr = firstErr || e; }
   }
+  if (!list.length){
+    try {
+      source = "queue-times.com";
+      const d = await getJSON("https://queue-times.com/parks/"+p.qtId+"/queue_times.json", 12000);
+      const rides = (d.rides||[]).concat(...(d.lands||[]).map(l => l.rides||[]));
+      list = rides.map(x => ({name:x.name, status:x.is_open?"OPERATING":"CLOSED", wait:x.wait_time, show:false}));
+    } catch(e){}
+  }
+  if (!list.length) throw new Error("ThemeParks.wiki didn't load: " + (firstErr ? firstErr.message : "no data"));
   if (!list.length) throw new Error("empty");
   const h = Math.floor(nowT()/60), sk = K();
   samples[sk] = samples[sk] || {};
@@ -1347,18 +1359,27 @@ async function fetchLive(pid){
   save("samples", samples);
   return out;
 }
-let liveFailed = false;
+let liveFailed = false, liveError = "", liveRetry = null;
+/* last good copy, so a dropped signal doesn't throw away waits that are only minutes old */
+(function(){ const c = load("live", {}); for (const k in c) if (Date.now() - c[k].at < 40*60000) live[k] = c[k]; })();
 async function refreshLive(){
   setStatus("Checking live waits…", false);
+  clearTimeout(liveRetry);
   try {
-    live[S.park] = await fetchLive(S.park); liveFailed = false;
+    live[S.park] = await fetchLive(S.park); liveFailed = false; liveError = "";
+    const c = load("live", {}); c[S.park] = live[S.park]; save("live", c);
     if (eventOn()){   // on event nights, new houses from the feed start out ticked
       const seen = S.seen[K()] = S.seen[K()] || {}, sel = S.sel[K()] = S.sel[K()] || [];
       for (const x of live[S.park].extras) if (!seen[x.id]){ seen[x.id] = 1; if (!sel.includes(x.id)) sel.push(x.id); }
       persist();
     }
   }
-  catch(e){ liveFailed = true; }
+  catch(e){
+    liveError = e.message;
+    // keep showing a recent copy if we have one; otherwise fall back to typical waits
+    liveFailed = !(live[S.park] && Date.now() - live[S.park].at < 40*60000);
+    liveRetry = setTimeout(() => { if (!document.hidden) refreshLive(); }, 60000);
+  }
   renderStatus(); renderRides();
   if (tab === "route") buildRoute(true);
 }
@@ -1485,13 +1506,16 @@ function renderFeed(){
 function renderStatus(){
   renderFeed();
   const L = live[S.park];
+  const installed = !/claude|anthropic/i.test(location.hostname) && location.protocol.startsWith("http");
+  const tm = x => new Date(x).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"});
   if (L && !liveFailed){
-    const t = new Date(L.at);
-    setStatus("Live · "+t.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"}), true);
-    $("liveNote").innerHTML = "";
+    setStatus("Live · "+tm(L.at), true);
+    $("liveNote").innerHTML = liveError ? '<div class="banner"><b>Couldn\'t refresh live waits.</b><span>Using the waits from '+tm(L.at)+'. '+esc(liveError)+'. Trying again every minute.</span></div>' : "";
   } else {
     setStatus("Typical waits", false);
-    $("liveNote").innerHTML = '<div class="banner"><b>Live waits aren\'t reachable from this page.</b><span>Routes use typical waits for each hour of the day. For the most accurate route, tap any wait sign and enter what the official app shows right now. The installed version of Queue Compass pulls live waits automatically.</span><span><button class="chipbtn" type="button" id="retryLive">Try live waits again</button></span></div>';
+    $("liveNote").innerHTML = installed
+      ? '<div class="banner"><b>Live waits didn\'t load.</b><span>Reason: '+esc(liveError || "unknown")+'. The app tries again every minute. Until then routes use typical waits, and you can tap any wait sign to type in what the official app shows.</span><span><button class="chipbtn" type="button" id="retryLive">Try now</button></span></div>'
+      : '<div class="banner"><b>Live waits aren\'t reachable from this page.</b><span>Routes use typical waits for each hour of the day. Tap any wait sign to type in what the official app shows. The installed app pulls live waits automatically.</span><span><button class="chipbtn" type="button" id="retryLive">Try again</button></span></div>';
     const b = $("retryLive"); if (b) b.onclick = refreshLive;
   }
 }
@@ -1765,13 +1789,23 @@ const TILES = {
 };
 const mapMode = () => tilesBlocked ? "draw" : (S.mapMode || "draw");
 function myPoint(){ return (lastFix && Date.now()-lastFix.at < 600000 && meters(lastFix.pt, parkCenter(S.park)) < 1500) ? lastFix.pt : null; }
+function mapStatusHtml(){
+  const g = graphFor(S.park), st = osmState[REGION[S.park]];
+  if (g){
+    const matched = Object.keys(osmRidePt[S.park] || {}).length, total = park().rides.length;
+    return '<p class="hint" style="margin:0">Routes follow real walkways from OpenStreetMap ('+g.paths.toLocaleString()+' path segments'+(g.parks && g.parks.length ? ' inside '+esc(g.parks.filter(Boolean).join(", ") || "the parks") : '')+'; '+matched+' of '+total+' rides placed on the map). <button class="chipbtn" type="button" id="osmReload">Re-download</button></p>';
+  }
+  if (st === "loading") return '<p class="hint" style="margin:0">Downloading the park\'s walkways… routes will follow real paths in a moment.</p>';
+  if (st === "failed") return '<div class="banner"><b>Walkways didn\'t download.</b><span>Reason: '+esc(osmError || "unknown")+'. Routes use straight lines between areas for now.</span><span><button class="chipbtn" type="button" id="osmReload">Try again</button></span></div>';
+  return '<p class="hint" style="margin:0">Routes use estimated paths between areas. Real walkways load in the installed app.</p>';
+}
 function mapSection(){
   const m = mapMode(), hasCalib = S.calib[S.park] && Object.keys(S.calib[S.park]).length;
   const btn = (k, t) => '<button type="button" data-map="'+k+'" aria-pressed="'+(m===k)+'"'+(tilesBlocked && k !== "draw" ? ' style="opacity:.45"' : '')+'>'+t+'</button>';
   return '<section class="block"><div class="maphead"><span class="label" style="flex:1">Route map</span><div class="seg mini" id="mapSeg" role="group" aria-label="Map style">'+btn("draw","Drawing")+btn("street","Street")+btn("sat","Satellite")+'</div></div>'+
     (tilesBlocked ? '<div class="banner"><b>Street and satellite maps work in the installed app.</b><span>This page isn\'t allowed to load map images, so it shows the drawing instead. Live waits and your location also need the installed app.</span></div>' : '')+
     '<div class="mapcard" id="mapBox"></div>'+
-    '<p class="hint" style="margin:0">'+(graphFor(S.park) ? 'Routes follow real walkways from OpenStreetMap, and walk times use their actual length.' : osmState[REGION[S.park]] === "loading" ? 'Downloading the park\'s walkways… routes will follow real paths in a moment.' : 'Routes use estimated paths between areas. Real walkways load in the installed app.')+'</p>'+
+    mapStatusHtml()+
     (m !== "draw" ? '<div class="tools"><button class="chipbtn" type="button" id="pinEdit" aria-pressed="'+pinEdit+'">'+(pinEdit ? "Done moving pins" : "Move area pins")+'</button>'+(hasCalib ? '<button class="chipbtn" type="button" id="pinReset">Reset pins</button>' : '')+'</div>'+
       (pinEdit ? '<p class="hint" style="margin:0">Drag each area\'s pin to where it really is. Your phone saves the new spots and uses them for location and the map.</p>' : '') : '');
 }
@@ -1922,6 +1956,7 @@ $("routeBody").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
   if (b.dataset.map){ S.mapMode = b.dataset.map; pinEdit = false; persist(); renderRoute(); return; }
   if (b.id === "pinEdit"){ pinEdit = !pinEdit; renderRoute(); return; }
+  if (b.id === "osmReload"){ const rg = REGION[S.park]; delete osm[rg]; delete osmState[rg]; try { localStorage.removeItem("qc.osm." + rg); } catch(e){} ensureOSM(S.park); renderRoute(); return; }
   if (b.id === "pinReset"){ delete S.calib[S.park]; persist(); renderRoute(); return; }
   const id = b.dataset.done || b.dataset.skip; if (!id) return;
   const r = allRides().find(x => x.id === id);
@@ -1941,29 +1976,49 @@ $("tabRoute").onclick = () => setTab("route");
 const REGION = {usf:"resort", ioa:"resort", epic:"epic"};
 const BBOX = {resort:[28.4650,-81.4790,28.4830,-81.4600], epic:[28.4150,-81.4750,28.4650,-81.4250]};
 const OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
-const osm = {}, osmState = {};                 // region -> hydrated graph; region -> "loading" | "failed" | "ready"
+const osm = {}, osmState = {}; let osmError = "";                 // region -> hydrated graph; region -> "loading" | "failed" | "ready"
 const graphFor = pid => osm[REGION[pid]] || null;
 function osmQuery(b){
   const bb = b.join(",");
-  return '[out:json][timeout:60];' +
-    'way["highway"~"^(footway|pedestrian|path|steps|living_street|corridor)$"]('+bb+');out body;>;out skel qt;' +
+  return '[out:json][timeout:90];' +
+    'way["highway"~"^(footway|pedestrian|path|steps|living_street|corridor|service|unclassified|residential|track|cycleway)$"]('+bb+');out body;>;out skel qt;' +
+    '(way["tourism"="theme_park"]('+bb+');relation["tourism"="theme_park"]('+bb+'););out geom;' +
     '(node["tourism"="attraction"]('+bb+');way["tourism"="attraction"]('+bb+');node["attraction"]('+bb+');way["attraction"]('+bb+'););out center tags;';
 }
+function inPoly(pt, poly){
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++){
+    const [yi, xi] = poly[i], [yj, xj] = poly[j];
+    if (((yi > pt[0]) !== (yj > pt[0])) && (pt[1] < (xj - xi) * (pt[0] - yi) / (yj - yi) + xi)) c = !c;
+  }
+  return c;
+}
 function osmCompact(data){
-  const pos = new Map(), idx = new Map(), lat = [], lon = [], edges = [], attractions = [];
+  const pos = new Map(), idx = new Map(), lat = [], lon = [], edges = [], attractions = [], parks = [];
   for (const e of data.elements || []) if (e.type === "node" && e.lat != null) pos.set(e.id, [e.lat, e.lon]);
+  // theme park outlines: only walkways inside a park are used, so routes never leave through backstage roads or city streets
+  for (const e of data.elements || []){
+    const t = e.tags || {};
+    if (t.tourism !== "theme_park") continue;
+    let ring = [];
+    if (e.type === "way" && e.geometry) ring = e.geometry.map(g => [g.lat, g.lon]);
+    else if (e.type === "relation" && e.members) for (const m of e.members) if (m.role !== "inner" && m.geometry) ring = ring.concat(m.geometry.map(g => [g.lat, g.lon]));
+    if (ring.length > 3) parks.push({name:t.name || "", ring});
+  }
+  const inside = pt => !parks.length || parks.some(p => inPoly(pt, p.ring));
   const getI = id => { let i = idx.get(id); if (i === undefined){ const p = pos.get(id); if (!p) return -1; i = lat.length; idx.set(id, i); lat.push(+p[0].toFixed(6)); lon.push(+p[1].toFixed(6)); } return i; };
   for (const e of data.elements || []){
     const t = e.tags || {};
     if (e.type === "way" && t.highway && e.nodes){
       if (/^(private|no)$/.test(t.access || "") || t.foot === "no") continue;
+      if (!e.nodes.some(id => pos.has(id) && inside(pos.get(id)))) continue;
       for (let k = 1; k < e.nodes.length; k++){ const a = getI(e.nodes[k-1]), b = getI(e.nodes[k]); if (a >= 0 && b >= 0 && a !== b) edges.push(a, b); }
     } else if (t.name && (t.tourism === "attraction" || t.attraction)){
       const c = e.type === "node" ? [e.lat, e.lon] : e.center ? [e.center.lat, e.center.lon] : null;
       if (c) attractions.push([t.name, +c[0].toFixed(6), +c[1].toFixed(6)]);
     }
   }
-  return {v:1, at:Date.now(), lat, lon, edges, attractions};
+  return {v:2, at:Date.now(), lat, lon, edges, attractions, parks:parks.map(p => p.name)};
 }
 function osmHydrate(g){
   const n = g.lat.length, off = new Int32Array(n + 1), E = g.edges;
@@ -1985,23 +2040,31 @@ function osmHydrate(g){
     if (size > bestSize){ bestSize = size; best = c; }
   }
   g.comp = comp; g.main = best;
+  g.paths = E.length / 2;
   return g;
 }
 const OSM_CELL = 0.0005;   // ~55 m
 const osmCell = (la, lo) => Math.floor(la / OSM_CELL) + ":" + Math.floor(lo / OSM_CELL);
-function osmSnap(g, pt){
-  const key = pt[0].toFixed(6) + "," + pt[1].toFixed(6);
+/* nearest path point to pt (optionally only on one connected network, so both ends of a walk can meet) */
+function osmSnap(g, pt, comp){
+  const key = pt[0].toFixed(6) + "," + pt[1].toFixed(6) + "|" + (comp == null ? "" : comp);
   if (g.snaps.has(key)) return g.snaps.get(key);
   const ci = Math.floor(pt[0] / OSM_CELL), cj = Math.floor(pt[1] / OSM_CELL);
   let best = -1, bd = Infinity;
-  for (let r = 0; r <= 3 && best < 0; r++)
+  for (let r = 0; r <= 5 && best < 0; r++)
     for (let i = ci - r; i <= ci + r; i++) for (let j = cj - r; j <= cj + r; j++){
       const a = g.grid.get(i + ":" + j); if (!a) continue;
-      for (const v of a){ if (g.comp[v] !== g.main) continue; const d = meters(pt, [g.lat[v], g.lon[v]]); if (d < bd){ bd = d; best = v; } }
+      for (const v of a){ if (comp != null && g.comp[v] !== comp) continue; const d = meters(pt, [g.lat[v], g.lon[v]]); if (d < bd){ bd = d; best = v; } }
     }
-  const res = best >= 0 ? {v:best, d:bd} : null;
+  const res = best >= 0 && bd < 250 ? {v:best, d:bd} : null;
   g.snaps.set(key, res);
   return res;
+}
+function osmEnds(g, a, b){
+  const sa = osmSnap(g, a); if (!sa) return null;
+  const sb = osmSnap(g, b, g.comp[sa.v]); if (sb) return [sa, sb];
+  const sb2 = osmSnap(g, b); if (!sb2) return null;
+  const sa2 = osmSnap(g, a, g.comp[sb2.v]); return sa2 ? [sa2, sb2] : null;
 }
 function osmSssp(g, s){
   let r = g.sp.get(s); if (r) return r;
@@ -2021,14 +2084,14 @@ function osmSssp(g, s){
 }
 /* walking distance in metres along paths, or null if either end is off the path network */
 function osmDist(g, a, b){
-  const sa = osmSnap(g, a), sb = osmSnap(g, b);
-  if (!sa || !sb) return null;
+  const ends = osmEnds(g, a, b); if (!ends) return null;
+  const [sa, sb] = ends;
   const d = osmSssp(g, sa.v).dist[sb.v];
   return isFinite(d) ? d + sa.d + sb.d : null;
 }
 function osmPath(g, a, b){
-  const sa = osmSnap(g, a), sb = osmSnap(g, b);
-  if (!sa || !sb) return null;
+  const ends = osmEnds(g, a, b); if (!ends) return null;
+  const [sa, sb] = ends;
   const {dist, prev} = osmSssp(g, sa.v);
   if (!isFinite(dist[sb.v])) return null;
   const out = [b];
@@ -2075,7 +2138,7 @@ async function ensureOSM(pid){
   const region = REGION[pid];
   if (osm[region] || osmState[region] === "loading") return;
   const cached = load("osm." + region, null);
-  if (cached && cached.v === 1 && Date.now() - cached.at < 30*864e5){
+  if (cached && cached.v === 2 && Date.now() - cached.at < 30*864e5){
     osm[region] = osmHydrate(cached); osmState[region] = "ready"; osmMatchRides(region); return;
   }
   osmState[region] = "loading";
@@ -2087,12 +2150,12 @@ async function ensureOSM(pid){
       clearTimeout(tm);
       if (!res.ok) throw new Error(res.status);
       const g = osmCompact(await res.json());
-      if (g.edges.length < 50) throw new Error("too few paths");
+      if (g.edges.length < 50) throw new Error("OpenStreetMap returned too few walkways");
       save("osm." + region, g);
       osm[region] = osmHydrate(g); osmState[region] = "ready"; osmMatchRides(region);
       if (REGION[S.park] === region){ if (tab === "route") buildRoute(); if (lastFix) onFix({coords:{latitude:lastFix.pt[0], longitude:lastFix.pt[1], accuracy:lastFix.acc}}); }
       return;
-    } catch(e){}
+    } catch(e){ osmError = e.name === "AbortError" ? "the map download took too long" : (e.message || "couldn't connect"); }
   }
   osmState[region] = "failed";
   if (tab === "route" && REGION[S.park] === region) renderRoute();
@@ -2198,7 +2261,7 @@ if (S.gps) startGPS();
 refreshLive();
 ensureOSM(S.park);
 setInterval(() => { if (!document.hidden) refreshLive(); }, 5*60000);
-document.addEventListener("visibilitychange", () => { if (!document.hidden && live[S.park] && Date.now()-live[S.park].at > 5*60000) refreshLive(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden && (liveFailed || !live[S.park] || Date.now()-live[S.park].at > 5*60000)) refreshLive(); });
 })();
 </script>
 
