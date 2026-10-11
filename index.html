@@ -1159,7 +1159,7 @@ function save(k, v){ try { localStorage.setItem("qc."+k, JSON.stringify(v)); } c
 const S = Object.assign({
   park: "usf", loc: {}, startMode: "now", start: "09:00", end: {}, crowd: 1,
   sel: {}, must: {}, done: {}, overrides: {},
-  event: {}, custom: {}, extraLand: {}, calib: {}, seen: {}, gps: false, plan: null, low: {}, inLine: null, pace: {mode:"normal", speed:0, minutes:0}, evHours: {}, opens: {}, showtimes: {}, pick: {}
+  event: {}, custom: {}, extraLand: {}, calib: {}, seen: {}, gps: false, plan: null, low: {}, inLine: null, pace: {mode:"normal", speed:0, minutes:0}, evHours: {}, opens: {}, showtimes: {}, pick: {}, adj: {}
 }, load("state", {}));
 let samples = load("samples", {});          // park -> ride -> hour -> [sum,count]
 const live = {};                             // park -> {rides:{id:{wait,status}}, extras:[], at}
@@ -1171,7 +1171,7 @@ if (!S.evHours.usf){   // your Horror Nights ticket: 2 PM to 2 AM
   if (!S.end.usf_hhn || S.end.usf_hhn === "01:00") S.end.usf_hhn = "02:00";
 }
 function persist(){ save("state", {park:S.park,loc:S.loc,startMode:S.startMode,start:S.start,end:S.end,crowd:S.crowd,sel:S.sel,must:S.must,done:S.done,overrides:S.overrides,
-  event:S.event,plan:S.plan,low:S.low,inLine:S.inLine,evHours:S.evHours,opens:S.opens,showtimes:S.showtimes,pick:S.pick,custom:S.custom,pace:S.pace,mapMode:S.mapMode,extraLand:S.extraLand,calib:S.calib,seen:S.seen,gps:S.gps}); }
+  event:S.event,plan:S.plan,low:S.low,inLine:S.inLine,evHours:S.evHours,opens:S.opens,showtimes:S.showtimes,pick:S.pick,adj:S.adj,custom:S.custom,pace:S.pace,mapMode:S.mapMode,extraLand:S.extraLand,calib:S.calib,seen:S.seen,gps:S.gps}); }
 
 /* ---------- Helpers ---------- */
 const $ = id => document.getElementById(id);
@@ -1276,9 +1276,16 @@ function currentWait(r){
   if (L && L.rides[r.id] && Date.now() - L.at < 40*60000){
     const x = L.rides[r.id];
     if (x.status !== "OPERATING") return {wait:null, src:"live", status:x.status};
-    if (x.wait != null) return {wait:x.wait, src:"live", age:Math.round((Date.now() - L.at)/60000)};
+    const age = Math.round((Date.now() - L.at)/60000), a = liveAdj(r.id);
+    if (x.wait != null) return a ? {wait:Math.round(x.wait * a), src:"adj", feed:x.wait, age} : {wait:x.wait, src:"live", age};
   }
   return null;
+}
+/* If the feed keeps posting less (or more) than the line really is, the wait you type in teaches the app
+   that ride's gap, and later feed readings are scaled by it for the rest of the night. */
+function liveAdj(id){
+  const a = ((S.adj || {})[K()] || {})[id];
+  return a && Date.now() - a.at < 8*3600000 ? a.ratio : null;
 }
 function waitAt(r, t, now){
   if (r.fixedWait != null) return r.fixedWait;
@@ -1393,7 +1400,7 @@ async function fetchLive(pid){
       used: r ? "Matched to "+r.name : (!x.show && (x.wait != null || eventOn())) ? "Added under More from the live feed" : x.show ? "Show listing, not used for routes" : "No wait posted, not used"});
     if (r){
       const prev = out.rides[r.id];
-      if (!(prev && prev.wait != null && x.wait == null)) out.rides[r.id] = {wait:x.wait, status:x.status||"OPERATING"};
+      if (!(prev && prev.wait != null && (x.wait == null || x.wait < prev.wait))) out.rides[r.id] = {wait:x.wait, status:x.status||"OPERATING"};
       if (x.wait != null && x.status === "OPERATING" && !r.show){
         const s = samples[sk][r.id] = samples[sk][r.id] || {};
         const c = s[h] = s[h] || [0,0]; c[0] += x.wait; c[1] += 1;
@@ -1724,7 +1731,7 @@ function waitChip(r){
   if (c && c.status) return '<button type="button" class="wait down" data-edit="'+r.id+'" aria-label="Edit wait"><b>—</b><i>'+(c.status==="DOWN"?"Down":"Closed")+'</i></button>';
   if (r.zone) return '<span class="wait"><b>'+r.dur+'</b><i>min walk</i></span>';
   if (r.show) return '<button type="button" class="wait" data-edit="'+r.id+'" aria-label="Show"><b>'+r.dur+'</b><i>min show</i></button>';
-  if (c) return '<button type="button" class="wait live'+lvl(c.wait)+'" data-edit="'+r.id+'" aria-label="Edit wait"><b>'+Math.round(c.wait)+'</b><i>'+(c.src==="you"?"posted":c.age >= 10 ? c.age+"m old" : "live")+'</i></button>';
+  if (c) return '<button type="button" class="wait live'+lvl(c.wait)+'" data-edit="'+r.id+'" aria-label="Edit wait"><b>'+Math.round(c.wait)+'</b><i>'+(c.src==="you"?"posted":c.age >= 10 ? c.age+"m old" : c.src==="adj" ? "live, fixed" : "live")+'</i></button>';
   const tw = round5(histWait(r, Math.max(now, T(toMin(hours().open)))));
   const L = live[S.park], unlisted = L && !liveFailed && !L.rides[r.id] && !r.custom && !r.extra && !r.show;
   return '<button type="button" class="wait'+lvl(tw)+'" data-edit="'+r.id+'" aria-label="Enter posted wait"><b>'+tw+'</b><i>'+(unlisted ? 'not listed' : 'typical')+'</i></button>';
@@ -2209,9 +2216,17 @@ $("rideList").addEventListener("click", e => {
   else if (b.dataset.edit){ editing = editing === b.dataset.edit ? null : b.dataset.edit; renderRides(); }
   else if (b.dataset.savewait){
     const id = b.dataset.savewait, v = Number($("ew_"+id).value);
-    if (Number.isFinite(v) && v >= 0){ const o = S.overrides[S.park] = S.overrides[S.park]||{}; o[id] = {wait:v, at:Date.now()}; persist(); }
+    if (Number.isFinite(v) && v >= 0){
+      const o = S.overrides[S.park] = S.overrides[S.park]||{}; o[id] = {wait:v, at:Date.now()};
+      const L = live[S.park], x = L && L.rides[id];
+      if (x && x.wait >= 5 && x.status === "OPERATING" && Date.now() - L.at < 40*60000){
+        const ratio = Math.min(3, Math.max(0.4, v / x.wait)), A = (S.adj = S.adj || {})[K()] = S.adj[K()] || {};
+        if (Math.abs(ratio - 1) >= 0.15) A[id] = {ratio, at:Date.now()}; else delete A[id];
+      }
+      persist();
+    }
     editing = null; renderRides();
-  } else if (b.dataset.clearwait){ const o = S.overrides[S.park]||{}; delete o[b.dataset.clearwait]; persist(); editing = null; renderRides(); }
+  } else if (b.dataset.clearwait){ const o = S.overrides[S.park]||{}; delete o[b.dataset.clearwait]; if (S.adj && S.adj[K()]) delete S.adj[K()][b.dataset.clearwait]; persist(); editing = null; renderRides(); }
 });
 $("rideList").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.id && e.target.id.startsWith("ew_")){ const b = e.target.parentNode.querySelector("[data-savewait]"); if (b) b.click(); } });
 $("routeBody").addEventListener("click", e => {
