@@ -1133,7 +1133,7 @@ function save(k, v){ try { localStorage.setItem("qc."+k, JSON.stringify(v)); } c
 const S = Object.assign({
   park: "usf", loc: {}, startMode: "now", start: "09:00", end: {}, crowd: 1,
   sel: {}, must: {}, done: {}, overrides: {},
-  event: {}, custom: {}, extraLand: {}, calib: {}, seen: {}, gps: false, pace: {mode:"normal", speed:0, minutes:0}, evHours: {}, opens: {}, showtimes: {}
+  event: {}, custom: {}, extraLand: {}, calib: {}, seen: {}, gps: false, plan: null, pace: {mode:"normal", speed:0, minutes:0}, evHours: {}, opens: {}, showtimes: {}
 }, load("state", {}));
 let samples = load("samples", {});          // park -> ride -> hour -> [sum,count]
 const live = {};                             // park -> {rides:{id:{wait,status}}, extras:[], at}
@@ -1145,7 +1145,7 @@ if (!S.evHours.usf){   // your Horror Nights ticket: 2 PM to 2 AM
   if (!S.end.usf_hhn || S.end.usf_hhn === "01:00") S.end.usf_hhn = "02:00";
 }
 function persist(){ save("state", {park:S.park,loc:S.loc,startMode:S.startMode,start:S.start,end:S.end,crowd:S.crowd,sel:S.sel,must:S.must,done:S.done,overrides:S.overrides,
-  event:S.event,evHours:S.evHours,opens:S.opens,showtimes:S.showtimes,custom:S.custom,pace:S.pace,mapMode:S.mapMode,extraLand:S.extraLand,calib:S.calib,seen:S.seen,gps:S.gps}); }
+  event:S.event,plan:S.plan,evHours:S.evHours,opens:S.opens,showtimes:S.showtimes,custom:S.custom,pace:S.pace,mapMode:S.mapMode,extraLand:S.extraLand,calib:S.calib,seen:S.seen,gps:S.gps}); }
 
 /* ---------- Helpers ---------- */
 const $ = id => document.getElementById(id);
@@ -1463,38 +1463,44 @@ function optimize(rides, t0, loc0, now, deadline, must){
   return best.o;
 }
 
-function buildRoute(auto){
-  const prev = lastPlan && lastPlan.key === K() ? lastPlan : null;
-  const p = park(), now = nowT();
-  const sel = S.sel[K()] || [], done = S.done[K()] || {}, must = S.must[K()] || {};
+/* Your stop order is locked once built. It only re-plans when you tap Done, Skip, Replan or Build my
+   route (reopt = true). Live waits and your position still update the times along the locked order, and
+   if a new order would clearly be better the route suggests it instead of switching on its own. */
+function buildRoute(auto, reopt){
+  const p = park(), now = nowT(), key = K();
+  const sel = S.sel[key] || [], done = S.done[key] || {}, must = S.must[key] || {};
   const pool = allRides().filter(r => sel.includes(r.id) && !done[r.id]);
   const closed = pool.filter(r => unavailable(r));
   const rides = pool.filter(r => !unavailable(r));
   const st = startTime();
-  let deadline = T(toMin(S.end[K()] || hours().close));
+  let deadline = T(toMin(S.end[key] || hours().close));
   if (deadline <= st.t) deadline += 24*60;
   const fromHere = st.t <= now + 1 && !!myPoint() && lastFix.acc <= 60;
   const loc = fromHere ? HERE : (S.loc[S.park] || p.lands[0]);
-  const order = optimize(rides, st.t, loc, now, deadline, must);
+  const lockedIds = !reopt && S.plan && S.plan.key === key ? S.plan.order : null;
+  let order, alert = null, better = null;
+  if (lockedIds){
+    const byId = new Map(rides.map(r => [r.id, r]));
+    order = lockedIds.map(id => byId.get(id)).filter(Boolean);
+    rides.forEach(r => { if (!lockedIds.includes(r.id)) order.push(r); });     // newly ticked: added at the end
+    const nextId = lockedIds.find(id => sel.includes(id) && !done[id]);
+    const nextClosed = nextId && closed.find(r => r.id === nextId);
+    if (nextClosed) alert = nextClosed.name + " is " + (unavailable(nextClosed) === "DOWN" ? "temporarily down" : "closed") + " right now, so it's set aside and your route carries on with the next stop. It slots back in if it reopens. Tap Replan if you'd like a fresh order.";
+    if (auto && order.length > 1){   // would a fresh plan be clearly better?
+      const cur = simulate(order, st.t, loc, now, deadline), alt = simulate(optimize(rides, st.t, loc, now, deadline, must), st.t, loc, now, deadline);
+      const fits = x => x.filter(q => q.fits).length, endOf = x => { const f = x.filter(q => q.fits); return f.length ? f[f.length-1].end : 0; };
+      const moreFits = fits(alt) - fits(cur), saves = Math.round(endOf(cur) - endOf(alt));
+      if (moreFits > 0 || (moreFits === 0 && saves >= 15)) better = {moreFits, saves, at: Date.now()};
+    }
+  } else {
+    order = optimize(rides, st.t, loc, now, deadline, must);
+    S.plan = {key, order: order.map(r => r.id), at: Date.now()}; persist();
+  }
   const steps = simulate(order, st.t, loc, now, deadline);
   const naive = simulate(rides, st.t, loc, now, deadline);
-  lastPlan = {steps, closed, st, deadline, naive, key:K(), checkedAt: Date.now(), fromHere, pt: myPoint(), doneCount: Object.keys(done).filter(k=>done[k]).length, change:null};
-  if (prev){
-    const ids = pl => pl.steps.filter(x => x.fits).map(x => x.r.id).join(",");
-    const keep = prev.change && Date.now() - prev.change.at < 20*60000 ? prev.change : null;
-    if (auto && ids(prev) !== ids(lastPlan)){
-      const pn = prev.steps.find(x => x.fits), nn = steps.find(x => x.fits);
-      const reopened = prev.closed.find(r => !closed.some(c => c.id === r.id));
-      let why = "Wait times shifted, so the order was updated.";
-      if (pn && (!nn || pn.r.id !== nn.r.id)){
-        const u = unavailable(pn.r), c = currentWait(pn.r);
-        if (u) why = pn.r.name+" is "+(u === "DOWN" ? "temporarily down" : "closed")+". It's out of the route until it reopens.";
-        else if (c && c.wait != null) why = pn.r.name+" is now posting "+Math.round(c.wait)+" min, so it moved later.";
-      } else if (reopened) why = reopened.name+" reopened and is back in your route.";
-      lastPlan.change = {at: Date.now(), why, next: nn ? nn.r.name : null, wasNext: pn && nn && pn.r.id !== nn.r.id ? pn.r.name : null};
-      try { if (navigator.vibrate) navigator.vibrate([120,80,120]); } catch(e){}
-    } else lastPlan.change = keep;
-  }
+  lastPlan = {steps, closed, st, deadline, naive, key, checkedAt: Date.now(), fromHere, pt: myPoint(), locked: !!lockedIds,
+    doneCount: Object.keys(done).filter(k => done[k]).length, change: null, alert, better};
+  if (alert && auto){ try { if (navigator.vibrate) navigator.vibrate([120,80,120]); } catch(e){} }
   renderRoute();
 }
 
@@ -1657,10 +1663,11 @@ function renderRoute(){
       '</div></li>';
   };
   const ch = P.change, nextFit = fit[0];
-  const changeHtml = ch ? '<div class="verdict upd"><b>Route updated at '+new Date(ch.at).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})+'</b><span>'+esc(ch.why)+(ch.next ? ' Next stop is now '+esc(ch.next)+'.' : '')+'</span>'+(ch.wasNext ? '<span class="hint">Already in line for '+esc(ch.wasNext)+'? Stay put and tap Done when you\'re off.</span>' : '')+'</div>' : '';
+  const changeHtml = (P.alert ? '<div class="verdict no"><span>'+esc(P.alert)+'</span></div>' : '') +
+    (P.better && !P.alert ? '<div class="verdict upd"><b>A better order is available</b><span>Waits have changed. Replanning now would '+(P.better.moreFits > 0 ? 'fit '+P.better.moreFits+' more' : 'finish about '+P.better.saves+' min sooner')+'. Your current plan stays until you choose.</span><span><button class="chipbtn" type="button" id="replan2">Use the new order</button></span></div>' : '');
   const L = live[S.park];
   const autoLine = (L && !liveFailed)
-    ? 'Live waits recheck every 5 minutes and the route re-orders itself. Last check: '+new Date(L.at).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})+'.'
+    ? 'Your stop order is locked until you tap Done, Skip or Replan. Times still update with live waits (last check '+new Date(L.at).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})+').'
     : (liveError ? 'Live waits didn\'t load ('+esc(liveError)+'). Retrying every minute; until then the route changes when you enter a posted wait or tap Done.' : 'Live waits aren\'t reachable here, so the route only changes when you enter a posted wait or tap Done.');
   let dirLink = '';
   if (nextFit && GEO[S.park] && nextFit.r.land !== "?"){
@@ -1686,7 +1693,8 @@ function renderRoute(){
     closedHtml(P.closed)+
     '<p class="hint">Tap <b>Done</b> after each ride. The app moves you to that spot and re-plans the rest from the current time and latest waits. Map areas are approximate.</p>';
   if ($("mapBox")) mountMap(P);
-  const rp = $("replan"); if (rp) rp.onclick = () => { S.startMode = "now"; persist(); renderParkControls(); buildRoute(); };
+  const rp = $("replan"); if (rp) rp.onclick = () => { S.startMode = "now"; persist(); renderParkControls(); buildRoute(false, true); };
+  const rp2 = $("replan2"); if (rp2) rp2.onclick = () => { S.startMode = "now"; persist(); renderParkControls(); buildRoute(false, true); };
 }
 function closedHtml(list){
   if (!list.length) return "";
@@ -1973,9 +1981,9 @@ $("routeBody").addEventListener("click", e => {
   const r = allRides().find(x => x.id === id);
   if (b.dataset.done){ const d = S.done[K()] = S.done[K()]||{}; d[id] = true; if (r && r.land !== "?") S.loc[S.park] = r.land; }
   else { S.sel[K()] = (S.sel[K()]||[]).filter(x => x !== id); }
-  S.startMode = "now"; persist(); renderParkControls(); renderRides(); buildRoute();
+  S.startMode = "now"; persist(); renderParkControls(); renderRides(); buildRoute(false, true);
 });
-$("buildBtn").onclick = () => setTab("route");
+$("buildBtn").onclick = () => { if (S.plan && S.plan.key === K()) S.plan = null; setTab("route"); };
 $("tabPlan").onclick = () => setTab("plan");
 $("tabRoute").onclick = () => setTab("route");
 
