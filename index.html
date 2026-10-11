@@ -1573,6 +1573,30 @@ function planOrder(rides, t0, loc0, now, deadline, must, low){
   const st = simulate(cur, t0, loc0, now, deadline), last = st[st.length-1];
   return cur.concat(optimize(rest, last ? last.end : t0, cur.length ? cur[cur.length-1] : loc0, now, deadline, {}));
 }
+/* Permanent rule: a must-do never lands under "won't fit". If one would, the non-must stops ahead of it
+   are moved behind it (if-time picks first, then whichever frees the most time) until it fits. If it still
+   can't fit (say, it can't open before closing) it stays in your route marked "at risk", never dropped. */
+function protectMust(order, t0, loc, now, deadline, must, low){
+  let o = order.slice();
+  const badMust = sim => sim.find(x => must[x.r.id] && !x.fits && !x.passed);
+  for (let guard = 0; guard < 40; guard++){
+    const sim = simulate(o, t0, loc, now, deadline), bad = badMust(sim);
+    if (!bad) break;
+    const at = o.indexOf(bad.r);
+    const cands = o.slice(0, at).filter(r => !must[r.id] && !r.meal && pickedAt(r) == null);
+    if (!cands.length) break;
+    const fitsOf = x => x.filter(q => q.fits).length;
+    let best = null;
+    for (const c of cands){
+      const trial = o.filter(r => r !== c).concat([c]), ts = simulate(trial, t0, loc, now, deadline);
+      const mineOk = ts.find(x => x.r === bad.r).fits;
+      const sc = (mineOk ? 1e6 : 0) + (low[c.id] ? 1e4 : 0) + fitsOf(ts) * 100 - (ts.find(x => x.r === bad.r).end) * 0.01;
+      if (!best || sc > best.sc) best = {o: trial, sc};
+    }
+    o = best.o;
+  }
+  return o;
+}
 function buildRoute(auto, reopt){
   const p = park(), now = nowT(), key = K();
   const sel = S.sel[key] || [], done = S.done[key] || {}, must = S.must[key] || {}, low = (S.low || {})[key] || {};
@@ -1619,7 +1643,13 @@ function buildRoute(auto, reopt){
     order = planOrder(rides, t0, loc, now, deadline, must, low);
     S.plan = {key, order: (IL ? [IL.id] : []).concat(order.map(r => r.id)), at: Date.now()}; persist();
   }
-  const steps = (ilStep ? [ilStep] : []).concat(simulate(order, t0, loc, now, deadline));
+  const prot = protectMust(order, t0, loc, now, deadline, must, low);
+  if (prot.some((r, i) => r !== order[i])){
+    order = prot; S.plan = {key, order: (IL ? [IL.id] : []).concat(order.map(r => r.id)), at: Date.now()}; persist();
+  }
+  const sim = simulate(order, t0, loc, now, deadline);
+  for (const x of sim) if (must[x.r.id] && !x.fits && !x.passed){ x.fits = true; x.atRisk = true; }
+  const steps = (ilStep ? [ilStep] : []).concat(sim);
   const naive = (ilStep ? [ilStep] : []).concat(simulate(rides, t0, loc, now, deadline));
   lastPlan = {steps, closed, st, deadline, naive, key, checkedAt: Date.now(), fromHere, pt: myPoint(), locked: !!lockedIds,
     doneCount: Object.keys(done).filter(k => done[k]).length, change: null, alert, better};
@@ -1740,6 +1770,7 @@ let editing = null, editTimes = null;
 function renderRides(){
   const p = park(), sel = S.sel[K()] || (S.sel[K()] = eventOn() ? [] : p.rides.filter(r=>!r.id.startsWith("hex")).map(r=>r.id));
   const must = S.must[K()] || {}, done = S.done[K()] || {}, lowP = (S.low || {})[K()] || {};
+  const inLineId = S.inLine && S.inLine.key === K() && S.inLine.day === new Date().toDateString() ? S.inLine.id : null;
   if (eventOn()){   // event houses and zones start out ticked the first time they appear
     const seen = S.seen[K()] = S.seen[K()] || {};
     for (const r of p.eventRides) if (!seen[r.id]){ seen[r.id] = 1; if (!sel.includes(r.id)) sel.push(r.id); }
@@ -1765,6 +1796,7 @@ function renderRides(){
     return '<div class="ride'+(isDone?" off":"")+'">'+
       '<input type="checkbox" id="c_'+r.id+'" data-sel="'+r.id+'"'+(on?" checked":"")+'>'+
       '<div class="rname"><label for="c_'+r.id+'"><span>'+esc(r.name)+'</span></label><small>'+esc(sub)+'</small>'+opensIn+pickIn+areaSel+rm+
+        (!isDone && canLine(r) ? '<button type="button" class="chipbtn lowbtn" data-inlinenow="'+r.id+'" aria-pressed="'+(inLineId === r.id)+'">'+(inLineId === r.id ? 'In line now' : 'I\'m in line')+'</button>' : '')+
         (on && !isDone ? '<button type="button" class="chipbtn lowbtn" data-low="'+r.id+'" aria-pressed="'+(!!lowP[r.id])+'">'+(lowP[r.id] ? '↓ If time' : 'If time?')+'</button>' : '')+'</div>'+
       '<button type="button" class="star" data-must="'+r.id+'" aria-pressed="'+(!!must[r.id])+'" aria-label="Must-do">★</button>'+
       waitChip(r)+
@@ -1772,6 +1804,17 @@ function renderRides(){
       '</div>';
   }).join("") + '</div>').join("");
   if (editing){ const i = $("ew_"+editing); if (i) i.focus(); }
+}
+const canLine = r => !r.show && !r.zone && !r.meal;
+/* "I'm in line now" for any ride: it becomes your current stop and the rest of the night is re-planned
+   from when you'll be off it, starting from where it is. */
+function markInLine(id){
+  const r = allRides().find(x => x.id === id); if (!r) return;
+  const now = nowT(), c = currentWait(r), k = K();
+  S.inLine = {key:k, id, t:now, day:new Date().toDateString(), wait: Math.round(c && c.wait != null ? c.wait : waitAt(r, now, now))};
+  const sl = S.sel[k] = S.sel[k] || []; if (!sl.includes(id)) sl.push(id);
+  if (S.done[k]) delete S.done[k][id];
+  S.plan = null; S.startMode = "now"; persist();
 }
 function renderRoute(){
   const P = lastPlan, body = $("routeBody");
@@ -1788,9 +1831,12 @@ function renderRoute(){
   const saved = Math.round(naiveEnd - allEnd);
   const must = S.must[K()] || {}, lowR = (S.low || {})[K()] || {};
   const lateMain = late.filter(s => !lowR[s.r.id] && !s.passed), lateLow = late.filter(s => lowR[s.r.id]).length;
-  const verdict = lateMain.length
+  const verdict0 = lateMain.length
     ? '<div class="verdict no">'+lateMain.length+' of '+P.steps.length+' won\'t fit before '+fmt(P.deadline)+'. Drop a few, mark must-dos with ★ or extras as If time, or push your finish time later.</div>'
     : '<div class="verdict ok">'+(lateLow ? 'All your main picks fit. '+lateLow+' "if time" pick'+(lateLow>1?'s':'')+' won\'t fit '+(eventOn() ? 'tonight' : 'today')+', and that\'s okay.' : 'Everything fits.')+' You should finish around '+fmt(finish)+', with '+Math.max(0,Math.round(P.deadline-finish))+' min to spare.</div>';
+  const atRisk = fit.filter(s => s.atRisk);
+  const riskNote = atRisk.length ? '<div class="verdict no">Must-do'+(atRisk.length > 1 ? 's' : '')+' at risk: '+atRisk.map(s => esc(s.r.name)).join(", ")+'. Kept in your route; see the note on '+(atRisk.length > 1 ? 'each' : 'it')+'.</div>' : '';
+  const verdict = riskNote + verdict0;
   const step = (s, i, isLate) => {
     const c = currentWait(s.r);
     const src = c && c.wait!=null && Math.abs(s.arrive - nowT()) < 20 ? '<span class="pill live">'+(c.src==="you"?"posted":"live")+'</span>' : '<span class="pill">forecast</span>';
@@ -1801,6 +1847,7 @@ function renderRoute(){
       (s.afterClose && !s.showAt ? '<div class="meta"><span class="pill live">In line before close</span><span>Get in line by <b>'+fmtShort(LINE_BY)+'</b>; you\'ll ride after closing</span></div>' : '')+
       (s.showAt ? '<div class="meta"><span class="pill must">'+(s.r.meal ? 'Reservation ' : 'Show ')+fmtShort(s.showAt)+'</span><span>Be there by <b>'+fmtShort(s.showAt-earlyOf(s.r))+'</b>'+(s.r.meal ? '' : ' for a good spot')+'</span><span>Leave by <b>'+fmtShort(leaveAt(s))+'</b></span></div>'+
         (isLate || /claude|anthropic/i.test(location.hostname) ? '' : '<div class="tools"><button class="chipbtn" type="button" data-ics="'+s.r.id+'" data-at="'+s.showAt+'" data-leave="'+leaveAt(s)+'">Add to calendar with reminder</button></div>') : '')+
+      (s.atRisk ? '<div class="verdict no"><span>Must-do at risk: as planned this runs past '+fmt(P.deadline)+(s.noShow ? ' or misses the last show' : '')+'. It stays in your route. Skip a stop ahead of it, or move your finish time later, to make room.</span></div>' : '')+
       (s.noShow ? '<div class="meta"><span>No showtimes left that you can reach tonight</span></div>' : '')+
       (s.passed ? '<div class="meta"><span>'+(s.r.meal ? 'This reservation\'s time has passed. Tap Done if you\'ve eaten, or Remove it under Dining reservations.' : 'The '+fmtShort(s.showAt)+' show has started. Tap Done if you saw it, or pick another time for it on the Plan screen.')+'</span></div>' : '')+
       (s.lateBy > 0 ? '<div class="verdict no"><span>Running about '+s.lateBy+' min late for '+esc(s.r.name)+'. Leave now'+(s.r.meal ? ', or call the restaurant' : '')+'.</span></div>' : '')+
@@ -1809,9 +1856,9 @@ function renderRoute(){
       (s.inLineNow ? '<div class="meta"><span class="pill live">In line</span><span>Since <b>'+fmtShort(s.arrive)+'</b> · expected off by <b>'+fmtShort(s.end)+'</b>'+(s.end > s.expEnd + 1 ? ' (running long)' : '')+'</span></div>' : '')+
       (s.askDown ? '<div class="verdict no" style="display:grid;gap:8px"><span>'+esc(s.r.name)+' is '+(s.downNow === "DOWN" ? 'temporarily down' : 'closed')+' while you\'re in line. Stay and wait, or leave and replan? Either way it stays on your list and comes back into your route when it reopens.</span><div class="actions"><button type="button" class="done" data-keepwait="'+s.r.id+'">Keep waiting</button><button type="button" data-leavedown="'+s.r.id+'">Leave line &amp; replan</button></div></div>' : '')+
       (s.inLineNow && s.downNow && !s.askDown ? '<div class="hint">Down right now. You chose to keep waiting.</div>' : '')+
-      (isLate && !s.passed ? '' : s.inLineNow
+      (isLate && !s.passed ? (canLine(s.r) ? '<div class="actions"><button type="button" data-inline="'+s.r.id+'">I\'m in line now</button></div>' : '') : s.inLineNow
         ? '<div class="actions"><button type="button" class="done" data-done="'+s.r.id+'">Done ✓</button><button type="button" data-leftline="'+s.r.id+'">Left the line</button></div>'
-        : '<div class="actions">'+(i === 0 ? '<button type="button" data-inline="'+s.r.id+'">I\'m in line</button>' : '')+'<button type="button" class="done" data-done="'+s.r.id+'">Done ✓</button><button type="button" data-skip="'+s.r.id+'">Skip</button></div>')+
+        : '<div class="actions">'+(canLine(s.r) ? '<button type="button" data-inline="'+s.r.id+'">I\'m in line now</button>' : '')+'<button type="button" class="done" data-done="'+s.r.id+'">Done ✓</button><button type="button" data-skip="'+s.r.id+'">Skip</button></div>')+
       '</div></li>';
   };
   const ch = P.change, nextFit = fit[0];
@@ -2210,6 +2257,11 @@ $("rideList").addEventListener("click", e => {
     S.custom[S.park] = (S.custom[S.park]||[]).filter(x => x.id !== b.dataset.remove);
     S.sel[K()] = (S.sel[K()]||[]).filter(x => x !== b.dataset.remove); persist(); renderRides(); return;
   }
+  if (b.dataset.inlinenow){
+    const id = b.dataset.inlinenow;
+    if (S.inLine && S.inLine.id === id && S.inLine.key === K()){ S.inLine = null; S.plan = null; persist(); renderRides(); return; }
+    markInLine(id); renderRides(); setTab("route"); return;
+  }
   if (b.dataset.must){ const m = S.must[K()] = S.must[K()]||{}; m[b.dataset.must] = !m[b.dataset.must]; if (m[b.dataset.must] && S.low && S.low[K()]) delete S.low[K()][b.dataset.must]; persist(); renderRides(); }
   else if (b.dataset.low){ const l = (S.low = S.low || {})[K()] = S.low[K()] || {}, id = b.dataset.low; l[id] = !l[id]; if (l[id] && S.must[K()]) delete S.must[K()][id]; persist(); renderRides(); }
   else if (b.dataset.edittimes){ editTimes = editTimes === b.dataset.edittimes ? null : b.dataset.edittimes; renderRides(); }
@@ -2235,12 +2287,7 @@ $("routeBody").addEventListener("click", e => {
   if (b.id === "pinEdit"){ pinEdit = !pinEdit; renderRoute(); return; }
   if (b.id === "osmReload"){ const rg = REGION[S.park]; delete osm[rg]; delete osmState[rg]; try { localStorage.removeItem("qc.osm." + rg); } catch(e){} ensureOSM(S.park); renderRoute(); return; }
   if (b.id === "pinReset"){ delete S.calib[S.park]; persist(); renderRoute(); return; }
-  if (b.dataset.inline){
-    const r = allRides().find(x => x.id === b.dataset.inline); if (!r) return;
-    const now = nowT(), c = currentWait(r);
-    S.inLine = {key:K(), id:r.id, t:now, day:new Date().toDateString(), wait: Math.round(c && c.wait != null ? c.wait : waitAt(r, now, now))};
-    persist(); buildRoute(); return;
-  }
+  if (b.dataset.inline){ markInLine(b.dataset.inline); renderRides(); buildRoute(false, true); window.scrollTo(0,0); return; }
   if (b.dataset.leftline){ S.inLine = null; persist(); buildRoute(); return; }
   if (b.dataset.keepwait){ if (S.inLine) S.inLine.keep = true; persist(); buildRoute(); return; }
   if (b.dataset.leavedown){ S.inLine = null; S.startMode = "now"; persist(); buildRoute(false, true); return; }
