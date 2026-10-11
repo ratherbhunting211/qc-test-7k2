@@ -1650,7 +1650,7 @@ function renderRoute(){
   const L = live[S.park];
   const autoLine = (L && !liveFailed)
     ? 'Live waits recheck every 5 minutes and the route re-orders itself. Last check: '+new Date(L.at).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})+'.'
-    : 'Live waits aren\'t reachable here, so the route only changes when you enter a posted wait or tap Done.';
+    : (liveError ? 'Live waits didn\'t load ('+esc(liveError)+'). Retrying every minute; until then the route changes when you enter a posted wait or tap Done.' : 'Live waits aren\'t reachable here, so the route only changes when you enter a posted wait or tap Done.');
   let dirLink = '';
   if (nextFit && GEO[S.park] && nextFit.r.land !== "?"){
     const pt = landPoint(S.park, nextFit.r.land);
@@ -1742,7 +1742,7 @@ function mapSvg(P){
   const line = (pts, attrs) => '<polyline points="'+pts.map(q => f(q[0])+","+f(q[1])).join(" ")+'" fill="none" stroke-linecap="round" stroke-linejoin="round" '+attrs+'/>';
   if (g){   // real walkways as the base map
     const d = [], x1 = x0 + W, y1 = y0 + H;
-    for (let k = 0; k < g.edges.length; k += 2){
+    for (let k = 0; k < (g.drawn || g.edges.length); k += 2){
       const A = proj([g.lat[g.edges[k]], g.lon[g.edges[k]]]), B = proj([g.lat[g.edges[k+1]], g.lon[g.edges[k+1]]]);
       if ((A[0] < x0 && B[0] < x0) || (A[0] > x1 && B[0] > x1) || (A[1] < y0 && B[1] < y0) || (A[1] > y1 && B[1] > y1)) continue;
       d.push("M"+f(A[0])+" "+f(A[1])+"L"+f(B[0])+" "+f(B[1]));
@@ -1982,7 +1982,7 @@ const graphFor = pid => osm[REGION[pid]] || null;
 function osmQuery(b){
   const bb = b.join(",");
   return '[out:json][timeout:90];' +
-    'way["highway"~"^(footway|pedestrian|path|steps|living_street|corridor|service|unclassified|residential|track|cycleway)$"]('+bb+');out body;>;out skel qt;' +
+    '(way["highway"~"^(footway|pedestrian|path|steps|living_street|corridor|service|unclassified|residential|track|cycleway)$"]('+bb+');way["area:highway"]('+bb+');way["place"="square"]('+bb+'););out body;>;out skel qt;' +
     '(way["tourism"="theme_park"]('+bb+');relation["tourism"="theme_park"]('+bb+'););out geom;' +
     '(node["tourism"="attraction"]('+bb+');way["tourism"="attraction"]('+bb+');node["attraction"]('+bb+');way["attraction"]('+bb+'););out center tags;';
 }
@@ -2023,7 +2023,29 @@ function osmCompact(data){
       if (c) attractions.push([t.name, +c[0].toFixed(6), +c[1].toFixed(6)]);
     }
   }
-  return {v:3, at:Date.now(), lat, lon, edges, attractions, parks:parks.map(p => p.name)};
+  /* Open plazas (mapped as areas, not lines) can be crossed in a straight line: link points around and
+     inside each plaza that can see each other across it. These links are used for routing, not drawn. */
+  const drawn = edges.length;
+  for (const e of data.elements || []){
+    const t = e.tags || {};
+    if (e.type !== "way" || !e.nodes || e.nodes.length < 4 || e.nodes[0] !== e.nodes[e.nodes.length-1]) continue;
+    const isPlaza = /^(pedestrian|footway|living_street|path)$/.test(t["area:highway"] || "") || t.place === "square" || (/^(pedestrian|footway|living_street)$/.test(t.highway || "") && t.area === "yes");
+    if (!isPlaza || /^(private|no)$/.test(t.access || "")) continue;
+    const ring = e.nodes.map(id => pos.get(id)).filter(Boolean);
+    if (ring.length < 4 || !ring.some(inside)) continue;
+    let pts = [...new Set(e.nodes.map(getI).filter(i => i >= 0))];
+    const la0 = Math.min(...ring.map(q => q[0])), la1 = Math.max(...ring.map(q => q[0])), lo0 = Math.min(...ring.map(q => q[1])), lo1 = Math.max(...ring.map(q => q[1]));
+    for (let i = 0; i < lat.length; i++) if (lat[i] > la0 && lat[i] < la1 && lon[i] > lo0 && lon[i] < lo1 && !pts.includes(i) && inPoly([lat[i], lon[i]], ring)) pts.push(i);
+    if (pts.length > 160){ const step = pts.length / 160; pts = Array.from({length:160}, (_, k) => pts[Math.floor(k * step)]); }
+    for (let x = 0; x < pts.length; x++) for (let y = x + 1; y < pts.length; y++){
+      const A = [lat[pts[x]], lon[pts[x]]], B = [lat[pts[y]], lon[pts[y]]];
+      if (meters(A, B) > 220) continue;
+      let ok = true;
+      for (const f of [0.2, 0.4, 0.6, 0.8]) if (!inPoly([A[0] + (B[0]-A[0])*f, A[1] + (B[1]-A[1])*f], ring)){ ok = false; break; }
+      if (ok) edges.push(pts[x], pts[y]);
+    }
+  }
+  return {v:4, at:Date.now(), lat, lon, edges, drawn, attractions, parks:parks.map(p => p.name)};
 }
 function osmHydrate(g){
   /* OpenStreetMap often leaves small gaps where paths meet. Join pieces that come within 25 m of each other
@@ -2045,13 +2067,30 @@ function osmHydrate(g){
       }
     }
   }
-  g.edges = g.edges.concat(extra); g.bridges = extra.length / 2;
+  // Where OpenStreetMap is missing a link entirely, connect the closest points of separate path networks
+  // (up to 170 m apart). These "gap hops" count double, so real paths are always preferred.
+  const gapStart = g.edges.length + extra.length, gapBest = new Map();
+  for (let i = 0; i < n0; i++){
+    const ci = Math.floor(g.lat[i] / OSM_CELL), cj = Math.floor(g.lon[i] / OSM_CELL), ri = find(i);
+    for (let di = -3; di <= 3; di++) for (let dj = -3; dj <= 3; dj++){
+      const a = cellOf.get((ci + di) + ":" + (cj + dj)); if (!a) continue;
+      for (const j of a){
+        const rj = find(j); if (rj <= ri) continue;
+        const d = meters([g.lat[i], g.lon[i]], [g.lat[j], g.lon[j]]); if (d > 170) continue;
+        const key = ri + "_" + rj, cur = gapBest.get(key);
+        if (!cur || d < cur[2]) gapBest.set(key, [i, j, d]);
+      }
+    }
+  }
+  const gaps = [];
+  for (const [i, j] of gapBest.values()) gaps.push(i, j);
+  g.edges = g.edges.concat(extra, gaps); g.bridges = extra.length / 2; g.gapStart = gapStart; g.gaps = gaps.length / 2;
   const n = g.lat.length, off = new Int32Array(n + 1), E = g.edges;
   for (let k = 0; k < E.length; k++) off[E[k] + 1]++;
   for (let i = 0; i < n; i++) off[i + 1] += off[i];
   const nbr = new Int32Array(E.length), w = new Float32Array(E.length), fill = off.slice(0, n);
   for (let k = 0; k < E.length; k += 2){
-    const a = E[k], b = E[k+1], d = meters([g.lat[a], g.lon[a]], [g.lat[b], g.lon[b]]);
+    const a = E[k], b = E[k+1], d = meters([g.lat[a], g.lon[a]], [g.lat[b], g.lon[b]]) * (k >= g.gapStart ? 2 : 1);
     nbr[fill[a]] = b; w[fill[a]++] = d; nbr[fill[b]] = a; w[fill[b]++] = d;
   }
   Object.assign(g, {n, off, nbr, w, sp:new Map(), snaps:new Map(), grid:new Map()});
@@ -2065,7 +2104,7 @@ function osmHydrate(g){
     if (size > bestSize){ bestSize = size; best = c; }
   }
   g.comp = comp; g.main = best;
-  g.paths = E.length / 2;
+  g.paths = (g.drawn || E.length) / 2;
   return g;
 }
 const OSM_CELL = 0.0005;   // ~55 m
@@ -2163,7 +2202,7 @@ async function ensureOSM(pid){
   const region = REGION[pid];
   if (osm[region] || osmState[region] === "loading") return;
   const cached = load("osm." + region, null);
-  if (cached && cached.v === 3 && Date.now() - cached.at < 30*864e5){
+  if (cached && cached.v === 4 && Date.now() - cached.at < 30*864e5){
     osm[region] = osmHydrate(cached); osmState[region] = "ready"; osmMatchRides(region); return;
   }
   osmState[region] = "loading";
