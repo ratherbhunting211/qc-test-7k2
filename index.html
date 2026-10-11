@@ -994,8 +994,10 @@ const PARKS = {
        behind Minion Land, reached by Haunted House Access Path A (by the Universal Studios Store) or
        Path B (by Music Plaza). Other areas also come from the official app map; "?" means still unknown. */
     spurs: {"Soundstages": {via: "Production Central", extra: 4}},
-    /* opening times seen in the official app; the rest default to your event start and can be edited */
-    eventOpens: {h_jack: "14:00", h_evildead: "17:45"},
+    /* opening times from the official app; anything without a listed time opens at 6:30 PM. All editable. */
+    eventOpens: {h_jack:"14:00", h_stranger:"14:00", h_hellraiser:"14:00", h_ozzy:"17:15", h_sinners:"17:15",
+                 h_evildead:"17:45", h_cyber:"17:45", h_bloodengutz:"17:45", h_invasion:"18:00", h_madlands:"18:00"},
+    eventOpensDefault: "18:30",   // scare zones and anything without a listed time
     eventRides: [
       ["h_stranger","Stranger Things 5","Soundstages",120,5,["strangerthings"],"Haunted house · Access Path A or B"],
       ["h_evildead","Evil Dead Burn","Soundstages",90,5,["evildead"],"Haunted house · Access Path A or B"],
@@ -1006,7 +1008,7 @@ const PARKS = {
       ["h_sinners","Sinners","World Expo",80,5,["sinners"],"Haunted house"],
       ["h_cyber","Cybergoria","San Francisco",75,5,["cybergoria"],"Haunted house"],
       ["h_invasion","Invasion: Alien Abduction","Springfield",75,5,["alienabduction","invasion"],"Haunted house"],
-      ["h_bloodengutz","H.R. Bloodengutz Presents: A Halloween Fright-Tacular","?",70,5,["bloodengutz","frighttacular"],"Haunted house"],
+      ["h_bloodengutz","H.R. Bloodengutz Presents: A Halloween Fright-Tacular","World Expo",70,5,["bloodengutz","frighttacular"],"Haunted house"],
       ["z_sideshow","Sideshow of Decay","?",0,10,["sideshowofdecay"],"Scare zone","zone"],
       ["z_clowntown","Downtown Clowntown","New York",0,10,["clowntown"],"Scare zone","zone"],
       ["z_carnival","Infernal Carnival of Nightmares","Front gate",0,10,["infernalcarnival"],"Scare zone","zone"],
@@ -1250,7 +1252,7 @@ function waitAt(r, t, now){
 }
 /* When an event item opens: your edit, else the official time we know, else your event start. */
 const hasOpens = r => r.hhn || (r.custom && r.event) || (r.extra && eventOn());
-function opensStr(r){ return ((S.opens || {})[S.park] || {})[r.id] || r.opens || (hasOpens(r) ? hours().open : null); }
+function opensStr(r){ return ((S.opens || {})[S.park] || {})[r.id] || r.opens || (hasOpens(r) ? (park().eventOpensDefault || hours().open) : null); }
 function opensAt(r){ const o = hasOpens(r) && opensStr(r); return o ? T(toMin(o)) : null; }
 function unavailable(r){
   const c = currentWait(r);
