@@ -891,6 +891,10 @@ svg.leaflet-image-layer.leaflet-interactive path {
       <div class="parks" id="parkSeg" role="group" aria-label="Park"></div>
       <div id="eventBlock" hidden>
         <button type="button" class="toggle" id="eventToggle" aria-pressed="false"><span class="tico" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M12 6c-1-2 0-3.5 1.5-4" stroke="#9BE15D" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M12 6.5c-4.5-2-9 .8-9 6.5s4.2 8 9 8 9-2.3 9-8-4.5-8.5-9-6.5z" fill="#FF7A1A"/><path d="M7.5 11.5l2 1.5-2 .5zM16.5 11.5l-2 1.5 2 .5zM8 16.5c2.5 1.6 5.5 1.6 8 0l-1.3-.2-1.2.8-1.5-.8-1.5.8-1.2-.8z" fill="#2A0F4A"/></svg></span><span class="tname" id="eventName">Halloween Horror Nights</span><span class="tsub" id="eventSub"></span><span class="sw" aria-hidden="true"></span></button>
+        <div class="row2" id="evHours" hidden style="margin-top:10px">
+          <div class="field"><label class="hint" for="evOpen">Your event starts</label><input type="time" id="evOpen"></div>
+          <div class="field"><label class="hint" for="evClose">Your event ends</label><input type="time" id="evClose"></div>
+        </div>
       </div>
     </section>
 
@@ -1099,7 +1103,7 @@ const GEO = {
 const CURVE = [[420,.3],[540,.45],[600,.7],[660,.88],[720,1],[840,1],[900,.95],[960,.9],[1020,.85],[1080,.8],[1140,.72],[1200,.62],[1260,.5],[1380,.4]];
 /* Horror Nights: lines are longest in the first two or three hours, then fall off after midnight.
    Times past midnight are counted as 24:00+ so the night stays one continuous timeline. */
-const HHN_CURVE = [[1080,.75],[1110,1],[1200,1],[1260,.9],[1320,.8],[1380,.68],[1440,.55],[1500,.42],[1560,.32]];
+const HHN_CURVE = [[840,.45],[960,.6],[1080,.8],[1110,1],[1200,1],[1260,.9],[1320,.8],[1380,.68],[1440,.55],[1500,.42],[1560,.32],[1620,.25]];
 function curve(t){
   const C = eventOn() ? HHN_CURVE : CURVE;
   if (t <= C[0][0]) return C[0][1];
@@ -1117,15 +1121,19 @@ function save(k, v){ try { localStorage.setItem("qc."+k, JSON.stringify(v)); } c
 const S = Object.assign({
   park: "usf", loc: {}, startMode: "now", start: "09:00", end: {}, crowd: 1,
   sel: {}, must: {}, done: {}, overrides: {},
-  event: {}, custom: {}, extraLand: {}, calib: {}, seen: {}, gps: false, pace: {mode:"normal", speed:0, minutes:0}
+  event: {}, custom: {}, extraLand: {}, calib: {}, seen: {}, gps: false, pace: {mode:"normal", speed:0, minutes:0}, evHours: {}
 }, load("state", {}));
 let samples = load("samples", {});          // park -> ride -> hour -> [sum,count]
 const live = {};                             // park -> {rides:{id:{wait,status}}, extras:[], at}
 let tab = "plan";
 let lastPlan = null;
 
+if (!S.evHours.usf){   // your Horror Nights ticket: 2 PM to 2 AM
+  S.evHours.usf = {open:"14:00", close:"02:00"};
+  if (!S.end.usf_hhn || S.end.usf_hhn === "01:00") S.end.usf_hhn = "02:00";
+}
 function persist(){ save("state", {park:S.park,loc:S.loc,startMode:S.startMode,start:S.start,end:S.end,crowd:S.crowd,sel:S.sel,must:S.must,done:S.done,overrides:S.overrides,
-  event:S.event,custom:S.custom,pace:S.pace,mapMode:S.mapMode,extraLand:S.extraLand,calib:S.calib,seen:S.seen,gps:S.gps}); }
+  event:S.event,evHours:S.evHours,custom:S.custom,pace:S.pace,mapMode:S.mapMode,extraLand:S.extraLand,calib:S.calib,seen:S.seen,gps:S.gps}); }
 
 /* ---------- Helpers ---------- */
 const $ = id => document.getElementById(id);
@@ -1141,8 +1149,8 @@ const eventOn = () => !!(park().event && S.event[S.park]);
 const spurs = () => (eventOn() && park().spurs) || {};            // extra areas that only matter on event nights
 const allLands = () => park().lands.concat(Object.keys(spurs()));
 const K = () => S.park + (eventOn() ? "_hhn" : "");          // selections, finish time and samples are kept per day/night
-const hours = () => eventOn() ? park().event : park();
-const T = m => (eventOn() && m < 720) ? m + 1440 : m;        // after-midnight times continue the night
+const hours = () => eventOn() ? Object.assign({}, park().event, (S.evHours || {})[S.park]) : park();
+const T = m => (eventOn() && m < Math.max(300, toMin(hours().open) - 120)) ? m + 1440 : m;   // after-midnight times continue the night
 const nowT = () => T(nowMin());
 function allRides(){
   const p = park(), L = live[S.park], el = S.extraLand[S.park] || {};
@@ -1452,7 +1460,9 @@ function renderParkControls(){
   if (p.event){
     $("eventToggle").setAttribute("aria-pressed", String(eventOn()));
     $("eventName").textContent = p.event.name;
-    $("eventSub").textContent = eventOn() ? "On. Event hours "+fmt(toMin(p.event.open))+" to "+fmt(toMin(p.event.close))+". Houses come from the live feed, or add them below." : "Turn on for an event night. Switches to event hours and night-time wait patterns.";
+    $("eventSub").textContent = eventOn() ? "On. Your hours are "+fmt(toMin(hours().open))+" to "+fmt(toMin(hours().close))+". Change them below." : "Turn on for an event night. Switches to your event hours and night-time wait patterns.";
+    $("evHours").hidden = !eventOn();
+    if (eventOn()){ $("evOpen").value = hours().open; $("evClose").value = hours().close; }
   }
   $("openBtn").textContent = eventOn() ? "At event start" : "At park open";
   $("addSummary").textContent = eventOn() ? "Add a haunted house, scare zone or show" : "Add something that isn't listed";
@@ -1775,6 +1785,15 @@ $("loc").onchange = e => {
   }
 };
 $("endTime").onchange = e => { S.end[K()] = e.target.value; persist(); };
+function setEvHour(which, v){
+  if (!v) return;
+  const old = hours(), h = S.evHours[S.park] = Object.assign({open:old.open, close:old.close}, S.evHours[S.park]);
+  h[which] = v;
+  if (which === "close" && (!S.end[K()] || S.end[K()] === old.close)) S.end[K()] = v;   // finish-by follows the event end
+  persist(); renderAll();
+}
+$("evOpen").onchange = e => setEvHour("open", e.target.value);
+$("evClose").onchange = e => setEvHour("close", e.target.value);
 $("eventToggle").onclick = () => { S.event[S.park] = !S.event[S.park]; persist(); renderAll(); refreshLive(); };
 const DUR = {house:5, zone:10, show:25, ride:5}, KIND = {house:"Haunted house", zone:"Scare zone", show:"Show", ride:"Ride"};
 $("addKind").onchange = () => { $("addDur").placeholder = DUR[$("addKind").value]; $("addWait").disabled = $("addKind").value === "zone"; };
