@@ -1400,6 +1400,9 @@ function startTime(){
   if (n < open || n > close) return {t:open, note:(eventOn() ? park().event.name+" hasn't started" : "The park isn't open")+" right now, so this plan starts at "+fmt(open)+"."};
   return {t:n, note:""};
 }
+/* Park rule: if you're in line by 1 minute before closing you still get to ride, so when your
+   finish time is the park's closing time, anything you're in line for by then counts as fitting. */
+let LINE_BY = null;
 function simulate(order, t0, loc0, now, deadline){
   let t = t0, loc = loc0; const steps = [];
   for (const r of order){
@@ -1409,12 +1412,14 @@ function simulate(order, t0, loc0, now, deadline){
       const st = times.find(x => x - SHOW_EARLY >= t);
       if (st == null){ steps.push({r, walk:wk, arrive:t, hold:0, wait:0, end:t, fits:false, noShow:true}); t -= wk; continue; }
       const arrive = t, hold = st - SHOW_EARLY - t; t = st + r.dur;
-      steps.push({r, walk:wk, arrive, hold, showAt:st, wait:SHOW_EARLY, end:t, fits: t <= deadline});
+      const okShow = t <= deadline || (LINE_BY != null && st <= LINE_BY + 1);
+      steps.push({r, walk:wk, arrive, hold, showAt:st, wait:SHOW_EARLY, end:t, fits: okShow, afterClose: okShow && t > deadline});
       loc = r; continue;
     }
     const arrive = t, op = opensAt(r), hold = op != null && t < op ? op - t : 0; t += hold;
-    const w = waitAt(r, t, now); t += w + r.dur;
-    steps.push({r, walk:wk, arrive, hold, opens:op, wait:w, end:t, fits: t <= deadline});
+    const inLine = t, w = waitAt(r, t, now); t += w + r.dur;
+    const ok = t <= deadline || (LINE_BY != null && inLine <= LINE_BY);
+    steps.push({r, walk:wk, arrive, hold, opens:op, wait:w, end:t, inLine, fits: ok, afterClose: ok && t > deadline});
     loc = r;
   }
   return steps;
@@ -1502,6 +1507,8 @@ function buildRoute(auto, reopt){
   const st = startTime();
   let deadline = T(toMin(S.end[key] || hours().close));
   if (deadline <= st.t) deadline += 24*60;
+  let closeT = T(toMin(hours().close)); if (closeT <= st.t) closeT += 24*60;
+  LINE_BY = deadline >= closeT ? closeT - 1 : null;   // only when you're staying until closing
   const fromHere = st.t <= now + 1 && !!myPoint() && lastFix.acc <= 60;
   const loc = fromHere ? HERE : (S.loc[S.park] || p.lands[0]);
   const lockedIds = !reopt && S.plan && S.plan.key === key ? S.plan.order : null;
@@ -1686,6 +1693,7 @@ function renderRoute(){
       '<h3>'+esc(s.r.name)+'</h3>'+
       '<div class="meta"><span>'+esc(s.r.land==="?"?"Location unknown":s.r.land)+'</span>'+(must[s.r.id]?'<span class="pill must">Must-do</span>':'')+(lowR[s.r.id]?'<span class="pill">If time</span>':'')+src+'</div>'+
       '<div class="meta"><span>Walk <b>'+s.walk+'</b> min'+(i===0 && !isLate && P.fromHere ? ' from you' : '')+'</span><span>'+(s.r.zone?'No line':s.r.show?'Arrive early <b>'+SHOW_EARLY+'</b> min':'Wait <b>~'+round5(s.wait)+'</b> min')+'</span><span>'+(s.r.zone?'Walk-through':s.r.show?'Show':(s.r.house||(s.r.extra&&eventOn()))?'Inside':'Ride')+' <b>'+s.r.dur+'</b> min</span><span>Out by <b>'+fmtShort(s.end)+'</b></span></div>'+
+      (s.afterClose && !s.showAt ? '<div class="meta"><span class="pill live">In line before close</span><span>Get in line by <b>'+fmtShort(LINE_BY)+'</b>; you\'ll ride after closing</span></div>' : '')+
       (s.showAt ? '<div class="meta"><span class="pill must">Show '+fmtShort(s.showAt)+'</span><span>Be there by <b>'+fmtShort(s.showAt-SHOW_EARLY)+'</b> for a good spot</span></div>' : '')+
       (s.noShow ? '<div class="meta"><span>No showtimes left that you can reach tonight</span></div>' : '')+
       (s.hold > 0 && !s.showAt ? '<div class="meta"><span class="pill must">Opens '+fmtShort(s.opens)+'</span><span>You\'ll be there <b>'+Math.round(s.hold)+'</b> min before it opens</span></div>' : '')+
