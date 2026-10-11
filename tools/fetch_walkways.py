@@ -20,6 +20,7 @@ def query(b):
             f'(way["highway"~"^({HW})$"]({bb});way["area:highway"]({bb});way["place"="square"]({bb}););out body;>;out skel qt;'
             f'(way["tourism"="theme_park"]({bb});relation["tourism"="theme_park"]({bb}););out geom;'
             f'(way["building"]({bb});way["natural"="water"]({bb});way["water"]({bb}););out geom;'
+            f'(node["amenity"~"^(restaurant|fast_food|cafe|bar|food_court|ice_cream)$"]["name"]({bb});way["amenity"~"^(restaurant|fast_food|cafe|bar|food_court|ice_cream)$"]["name"]({bb}););out center tags;'
             f'(node["tourism"="attraction"]({bb});way["tourism"="attraction"]({bb});'
             f'node["attraction"]({bb});way["attraction"]({bb}););out center tags;')
 
