@@ -1451,6 +1451,9 @@ function startTime(){
 /* Park rule: if you're in line by 1 minute before closing you still get to ride, so when your
    finish time is the park's closing time, anything you're in line for by then counts as fitting. */
 let LINE_BY = null;
+/* Fallback when a must-do show can't be kept with the full 30 min early: allow an earlier showtime you can
+   still reach before it starts, with less time to get a spot, instead of losing a show. */
+let RELAX_EARLY = false;
 function simulate(order, t0, loc0, now, deadline){
   let t = t0, loc = loc0; const steps = [];
   /* Dining reservations are anchors, not stops that can be missed: before each stop, if doing it would
@@ -1474,11 +1477,12 @@ function simulate(order, t0, loc0, now, deadline){
     const wk = walk(loc, r); t += wk;
     const times = showTimes(r);
     if (times.length){   // be there early enough before the next showtime you can make
-      const E = earlyOf(r), st = times.find(x => x - E >= t);
+      const E = earlyOf(r); let st = times.find(x => x - E >= t), short = 0;
+      if (RELAX_EARLY){ const x = times.find(x => x >= t + 2); if (x != null && (st == null || x < st)){ st = x; short = Math.round(x - t); } }
       if (st == null) return {step:{r, walk:wk, arrive:t, hold:0, wait:0, end:t - wk, fits:false, noShow:true}, t:t - wk, skip:true};
-      const arrive = t, hold = st - E - t, end = st + r.dur;
+      const arrive = t, hold = short ? 0 : st - E - t, end = st + r.dur;
       const ok = end <= deadline || (LINE_BY != null && st <= LINE_BY + 1);
-      return {step:{r, walk:wk, arrive, hold, showAt:st, wait:E, end, fits:ok, afterClose: ok && end > deadline}, t:end};
+      return {step:{r, walk:wk, arrive, hold, showAt:st, wait:short || E, short, end, fits:ok, afterClose: ok && end > deadline}, t:end};
     }
     const arrive = t, op = opensAt(r), hold = op != null && t < op ? op - t : 0; t += hold;
     const inLine = t, w = waitAt(r, t, now); t += w + r.dur;
@@ -1599,8 +1603,9 @@ function protectMust(order, t0, loc, now, deadline, must, low){
 }
 function buildRoute(auto, reopt){
   const p = park(), now = nowT(), key = K();
-  const sel = S.sel[key] || [], done = S.done[key] || {}, must = S.must[key] || {}, low = (S.low || {})[key] || {};
+  const sel = S.sel[key] || [], done = S.done[key] || {}, low = (S.low || {})[key] || {};
   const pool0 = allRides().filter(r => sel.includes(r.id) && !done[r.id]);
+  const must = mustMap(key);
   // "I'm in line": that ride is fixed as the current stop and everything else is planned from when you're off it
   const il = S.inLine && S.inLine.key === key && S.inLine.day === new Date().toDateString() ? S.inLine : null;
   const IL = il ? pool0.find(r => r.id === il.id) : null;
@@ -1647,7 +1652,14 @@ function buildRoute(auto, reopt){
   if (prot.some((r, i) => r !== order[i])){
     order = prot; S.plan = {key, order: (IL ? [IL.id] : []).concat(order.map(r => r.id)), at: Date.now()}; persist();
   }
-  const sim = simulate(order, t0, loc, now, deadline);
+  let sim = simulate(order, t0, loc, now, deadline);
+  const nBad = x => x.filter(q => must[q.r.id] && !q.fits && !q.passed).length;
+  if (nBad(sim)){   // still a must-do out: try reaching shows with less than the full early time
+    RELAX_EARLY = true;
+    const o2 = protectMust(order, t0, loc, now, deadline, must, low), sim2 = simulate(o2, t0, loc, now, deadline);
+    RELAX_EARLY = false;
+    if (nBad(sim2) < nBad(sim)){ order = o2; sim = sim2; S.plan = {key, order: (IL ? [IL.id] : []).concat(order.map(r => r.id)), at: Date.now()}; persist(); }
+  }
   for (const x of sim) if (must[x.r.id] && !x.fits && !x.passed){ x.fits = true; x.atRisk = true; }
   const steps = (ilStep ? [ilStep] : []).concat(sim);
   const naive = (ilStep ? [ilStep] : []).concat(simulate(rides, t0, loc, now, deadline));
@@ -1769,7 +1781,7 @@ function waitChip(r){
 let editing = null, editTimes = null;
 function renderRides(){
   const p = park(), sel = S.sel[K()] || (S.sel[K()] = eventOn() ? [] : p.rides.filter(r=>!r.id.startsWith("hex")).map(r=>r.id));
-  const must = S.must[K()] || {}, done = S.done[K()] || {}, lowP = (S.low || {})[K()] || {};
+  const must = mustMap(K()), done = S.done[K()] || {}, lowP = (S.low || {})[K()] || {};
   const inLineId = S.inLine && S.inLine.key === K() && S.inLine.day === new Date().toDateString() ? S.inLine.id : null;
   if (eventOn()){   // event houses and zones start out ticked the first time they appear
     const seen = S.seen[K()] = S.seen[K()] || {};
@@ -1805,6 +1817,12 @@ function renderRides(){
   }).join("") + '</div>').join("");
   if (editing){ const i = $("ew_"+editing); if (i) i.focus(); }
 }
+/* Shows you pick count as must-dos (unless you mark them "If time"): like must-dos, they are never dropped. */
+function mustMap(key){
+  const m = Object.assign({}, S.must[key] || {}), low = (S.low || {})[key] || {};
+  for (const r of allRides()) if (r.show && !r.meal && !low[r.id]) m[r.id] = true;
+  return m;
+}
 const canLine = r => !r.show && !r.zone && !r.meal;
 /* "I'm in line now" for any ride: it becomes your current stop and the rest of the night is re-planned
    from when you'll be off it, starting from where it is. */
@@ -1829,7 +1847,7 @@ function renderRoute(){
   const naiveEnd = P.naive.length ? P.naive[P.naive.length-1].end : 0;
   const allEnd = P.steps[P.steps.length-1].end;
   const saved = Math.round(naiveEnd - allEnd);
-  const must = S.must[K()] || {}, lowR = (S.low || {})[K()] || {};
+  const must = mustMap(K()), lowR = (S.low || {})[K()] || {};
   const lateMain = late.filter(s => !lowR[s.r.id] && !s.passed), lateLow = late.filter(s => lowR[s.r.id]).length;
   const verdict0 = lateMain.length
     ? '<div class="verdict no">'+lateMain.length+' of '+P.steps.length+' won\'t fit before '+fmt(P.deadline)+'. Drop a few, mark must-dos with ★ or extras as If time, or push your finish time later.</div>'
@@ -1845,9 +1863,10 @@ function renderRoute(){
       '<div class="meta"><span>'+esc(s.r.land==="?"?"Location unknown":s.r.land)+'</span>'+(must[s.r.id]?'<span class="pill must">Must-do</span>':'')+(lowR[s.r.id]?'<span class="pill">If time</span>':'')+src+'</div>'+
       '<div class="meta"><span>Walk <b>'+s.walk+'</b> min'+(i===0 && !isLate && P.fromHere ? ' from you' : '')+'</span><span>'+(s.r.zone?'No line':s.r.show?'Arrive early <b>'+earlyOf(s.r)+'</b> min':'Wait <b>~'+round5(s.wait)+'</b> min')+'</span><span>'+(s.r.zone?'Walk-through':s.r.meal?'Meal':s.r.show?'Show':(s.r.house||(s.r.extra&&eventOn()))?'Inside':'Ride')+' <b>'+s.r.dur+'</b> min</span><span>Out by <b>'+fmtShort(s.end)+'</b></span></div>'+
       (s.afterClose && !s.showAt ? '<div class="meta"><span class="pill live">In line before close</span><span>Get in line by <b>'+fmtShort(LINE_BY)+'</b>; you\'ll ride after closing</span></div>' : '')+
-      (s.showAt ? '<div class="meta"><span class="pill must">'+(s.r.meal ? 'Reservation ' : 'Show ')+fmtShort(s.showAt)+'</span><span>Be there by <b>'+fmtShort(s.showAt-earlyOf(s.r))+'</b>'+(s.r.meal ? '' : ' for a good spot')+'</span><span>Leave by <b>'+fmtShort(leaveAt(s))+'</b></span></div>'+
+      (s.showAt ? '<div class="meta"><span class="pill must">'+(s.r.meal ? 'Reservation ' : 'Show ')+fmtShort(s.showAt)+'</span><span>Be there by <b>'+fmtShort(dueAt(s))+'</b>'+(s.r.meal ? '' : ' for a good spot')+'</span><span>Leave by <b>'+fmtShort(leaveAt(s))+'</b></span></div>'+
         (isLate || /claude|anthropic/i.test(location.hostname) ? '' : '<div class="tools"><button class="chipbtn" type="button" data-ics="'+s.r.id+'" data-at="'+s.showAt+'" data-leave="'+leaveAt(s)+'">Add to calendar with reminder</button></div>') : '')+
       (s.atRisk ? '<div class="verdict no"><span>Must-do at risk: as planned this runs past '+fmt(P.deadline)+(s.noShow ? ' or misses the last show' : '')+'. It stays in your route. Skip a stop ahead of it, or move your finish time later, to make room.</span></div>' : '')+
+      (s.short ? '<div class="verdict no"><span>Tight: to keep all your must-dos you\'ll get here about '+s.short+' min before the show instead of '+earlyOf(s.r)+'. Head straight over.</span></div>' : '')+
       (s.noShow ? '<div class="meta"><span>No showtimes left that you can reach tonight</span></div>' : '')+
       (s.passed ? '<div class="meta"><span>'+(s.r.meal ? 'This reservation\'s time has passed. Tap Done if you\'ve eaten, or Remove it under Dining reservations.' : 'The '+fmtShort(s.showAt)+' show has started. Tap Done if you saw it, or pick another time for it on the Plan screen.')+'</span></div>' : '')+
       (s.lateBy > 0 ? '<div class="verdict no"><span>Running about '+s.lateBy+' min late for '+esc(s.r.name)+'. Leave now'+(s.r.meal ? ', or call the restaurant' : '')+'.</span></div>' : '')+
@@ -1900,7 +1919,8 @@ function renderRoute(){
    Latest time to leave = be-there time minus the walk. The app alerts you then (while it's open or
    recently used), and a calendar event with an alarm can remind you even when it's closed. */
 const earlyOf = r => r.early != null ? r.early : SHOW_EARLY;
-function leaveAt(s){ return s.showAt - earlyOf(s.r) - (s.walk || 0); }
+const dueAt = s => s.short ? s.arrive : s.showAt - earlyOf(s.r);
+function leaveAt(s){ return dueAt(s) - (s.walk || 0); }
 function paceRouteLine(){
   const pc = S.pace || {}, f = paceFactor(), pct = Math.round((f - 1) * 100);
   let t;
