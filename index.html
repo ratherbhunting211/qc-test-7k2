@@ -131,6 +131,8 @@ select,input[type=time],input[type=number],input[type=text]{width:100%;backgroun
 .rname .opens input{min-height:32px;padding:3px 8px;width:auto;font-size:.82rem;border-radius:9px}
 .rname .lowbtn{justify-self:start;margin-top:5px;padding:2px 10px;font-size:.74rem;color:var(--muted)}
 .retadj{display:flex;gap:6px;flex-wrap:wrap}
+.undobtn{margin-top:6px;justify-self:start}
+.undoask{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px;font-size:.88rem}
 .retbox{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px}
 .retbox select{width:auto;min-width:64px;padding:8px 10px}
 .passtop{border:2px solid var(--accent);border-radius:18px;display:grid;gap:8px;margin-bottom:12px}
@@ -955,7 +957,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
       <p class="hint" style="margin:0">Tick what you want. ★ marks a must-do, so the route never drops it. Tap a wait sign to type the posted wait from the official app.</p>
       <div id="liveNote"></div>
       <details class="addbox" id="feedBox"><summary>Check what the live feed lists</summary><div id="feedList"></div></details>
-      <p class="hint" id="verLine" style="margin:10px 0 0">App version 53 · <button type="button" class="chipbtn lowbtn" id="checkUpdate">Check for update</button></p>
+      <p class="hint" id="verLine" style="margin:10px 0 0">App version 54 · <button type="button" class="chipbtn lowbtn" id="checkUpdate">Check for update</button></p>
       <div id="rideList" style="display:grid;gap:12px"></div>
       <details class="addbox" id="mealBox"><summary>Dining reservations</summary>
         <div class="addform">
@@ -1155,9 +1157,9 @@ const HHN_CURVE = [[840,.45],[960,.6],[1080,.8],[1110,1],[1200,1],[1260,.9],[132
 function curve(t){
   const C = eventOn() ? HHN_CURVE : CURVE;
   if (t <= C[0][0]) return C[0][1];
-  for (let i=1;i<C.length;i++){
-    const [x1,y1]=C[i]; const [x0,y0]=C[i-1];
-    if (t <= x1) return y0 + (y1-y0)*(t-x0)/(x1-x0);
+  for (let i = 1; i < C.length; i++){
+    const x1 = C[i][0];
+    if (t <= x1){ const x0 = C[i-1][0], y0 = C[i-1][1]; return y0 + (C[i][1] - y0) * (t - x0) / (x1 - x0); }
   }
   return C[C.length-1][1];
 }
@@ -1174,8 +1176,11 @@ const S = Object.assign({
 /* One "night" runs 6 AM to 6 AM, so a pass or "in line" at 11:50 PM survives midnight on event nights. */
 function nightId(){ return new Date(Date.now() - 6*3600000).toDateString(); }
 // a new day/night: clear what you rode, the locked order, passes and picks from last time (not on first run)
-if (S.night && S.night !== nightId()){ S.done = {}; S.doneLog = {}; S.plan = null; S.inLine = null; S.aqa = {}; S.pick = {}; S.adj = {}; S.feedExtras = {}; }
-S.night = nightId();
+function newNightCheck(){
+  if (S.night && S.night !== nightId()){ S.done = {}; S.doneLog = {}; S.plan = null; S.inLine = null; S.aqa = {}; S.pick = {}; S.adj = {}; S.feedExtras = {}; }
+  const changed = S.night !== nightId(); S.night = nightId(); return changed;
+}
+newNightCheck();
 if (!S.showtimesV){   // lists saved by older versions could be missing times added since (e.g. Blood Noir's 8:00 PM)
   for (const pid in (S.showtimes || {})) for (const id in S.showtimes[pid]){
     const base = ((PARKS[pid] || {}).eventTimes || {})[id];
@@ -1213,8 +1218,18 @@ const K = () => S.park + (eventOn() ? "_hhn" : "");          // selections, fini
 const hours = () => eventOn() ? Object.assign({}, park().event, (S.evHours || {})[S.park]) : park();
 // after-midnight times continue the night, but only for events that close after midnight, and only up to
 // 3 h past closing (so 10 AM on an event day is "before it opens", not "after tonight")
-const T = m => { if (!eventOn()) return m; const h = hours(), o = toMin(h.open), c = toMin(h.close); return c < o && m <= Math.min(c + 180, o - 60) ? m + 1440 : m; };
-const nowT = () => T(nowMin());
+let Tcfg = null;   // event open/close in minutes, kept for the length of one route build
+const T = m => {
+  if (!eventOn()) return m;
+  let cfg = Tcfg;
+  if (!cfg){ const h = hours(), o = toMin(h.open), c = toMin(h.close); cfg = {o, c, wrap: c < o, lim: Math.min(c + 180, o - 60)}; if (FROZEN_NOW != null) Tcfg = cfg; }
+  return cfg.wrap && m <= cfg.lim ? m + 1440 : m;
+};
+/* While a route is being built, "now" is frozen so the minute can't roll over halfway through planning
+   (which could make a show flip between fixed and flexible and drop out of the route). */
+let FROZEN_NOW = null;
+const planMemo = new Map();
+const nowT = () => FROZEN_NOW != null ? FROZEN_NOW : T(nowMin());
 function allRides(){
   const p = park(), L = live[S.park], el = S.extraLand[S.park] || {};
   const saved = ((S.feedExtras || {})[S.park] || {}), liveEx = (L && L.extras) || [];
@@ -1237,7 +1252,15 @@ function paceFactor(){
   if (pc.mode === "auto") return pc.minutes >= 3 && pc.speed ? Math.min(1.4, Math.max(0.75, 70 / pc.speed)) : 1;
   return PACE[pc.mode] || 1;
 }
-function walk(from, to){ return Math.max(1, Math.round(walkBase(from, to) * paceFactor())); }
+const memoKey = x => x === HERE ? "@here" : x && typeof x === "object" ? "#" + x.id : "L" + x;
+const walkMemo = new Map(), aqaMemo = new Map();   // per route build (cleared with planMemo)
+function walk(from, to){
+  if (FROZEN_NOW == null) return Math.max(1, Math.round(walkBase(from, to) * paceFactor()));
+  let row = walkMemo.get(from); if (!row) walkMemo.set(from, row = new Map());
+  let v = row.get(to);
+  if (v === undefined){ v = Math.max(1, Math.round(walkBase(from, to) * paceFactor())); row.set(to, v); }
+  return v;
+}
 /* from/to: a land name, HERE (your GPS position) or a ride object */
 const landOf = x => x && typeof x === "object" ? x.land : x;
 function posOf(x){
@@ -1351,7 +1374,7 @@ const earliestCache = new Map();
 function earliestShow(r){
   const times = showTimes(r); if (!times.length) return null;
   const now = nowT(), me = myPoint(), from = me ? HERE : (S.loc[S.park] || park().lands[0]);
-  const key = r.id + "|" + Math.floor(now) + "|" + (me ? me.map(x => x.toFixed(4)).join() : from);
+  const key = r.id + "|" + Math.floor(now) + "|" + (me ? me.map(x => x.toFixed(4)).join() : from) + "|" + times.join(",") + "|" + paceFactor();
   if (earliestCache.has(key)) return earliestCache.get(key);
   const wk = walk(from, r), v = times.find(x => x - SHOW_MIN_EARLY >= now + wk);
   if (earliestCache.size > 500) earliestCache.clear();
@@ -1360,6 +1383,10 @@ function earliestShow(r){
 }
 function pickedAt(r){
   if (!r.show || r.meal) return null;
+  if (FROZEN_NOW != null){ const k = "p" + r.id; if (planMemo.has(k)) return planMemo.get(k); const v = pickedAtCalc(r); planMemo.set(k, v); return v; }
+  return pickedAtCalc(r);
+}
+function pickedAtCalc(r){
   const p = pickRaw(r);
   if (p === "any" || (((S.low || {})[K()] || {})[r.id])) return null;
   const ex = pickExplicit(r); if (ex != null) return ex;
@@ -1379,17 +1406,27 @@ function parseTimes(str){
     if (m[3] === "p" && h < 12) h += 12;
     else if (m[3] === "a" && h === 12) h = 0;
     else if (!m[3] && h >= 4 && h < 12) h += 12;      // event nights: "8:30" means 8:30 PM, "1" means 1 AM
+    else if (!m[3] && h === 12 && eventOn()) h = 0;   // and "12:30" means 12:30 AM
     out.push(String(h).padStart(2, "0") + ":" + String(mi).padStart(2, "0"));
   }
   return [...new Set(out)].sort((a, b) => T(toMin(a)) - T(toMin(b)));
 }
 const fmtTimes = list => list.map(x => fmtShort(T(toMin(x)))).join(", ");
-function opensAt(r){ const o = hasOpens(r) && opensStr(r), base = o ? T(toMin(o)) : null, a = aqaAt(r); return a != null ? Math.max(a, base == null ? -1e9 : base) : base; }
+const opensMemo = new Map();
+function opensAt(r){
+  if (FROZEN_NOW == null) return opensAtCalc(r);
+  let v = opensMemo.get(r); if (v === undefined){ v = opensAtCalc(r); opensMemo.set(r, v); } return v;
+}
+function opensAtCalc(r){ const o = hasOpens(r) && opensStr(r), base = o ? T(toMin(o)) : null, a = aqaAt(r); return a != null ? Math.max(a, base == null ? -1e9 : base) : base; }
 /* Attraction Queue Accommodation: you hold a return time instead of standing in line. The ride counts as
    in line now (a must-do, never dropped); you can do other stops until the return time, then it's a short
    merge wait plus the ride. */
 const AQA_WAIT = 5;
-function aqaOf(id){ const a = ((S.aqa || {})[K()] || {})[id]; return a && a.day === nightId() ? a : null; }
+function aqaOf(id){
+  if (FROZEN_NOW != null){ let v = aqaMemo.get(id); if (v === undefined){ v = aqaOfCalc(id); aqaMemo.set(id, v); } return v; }
+  return aqaOfCalc(id);
+}
+function aqaOfCalc(id){ const a = ((S.aqa || {})[K()] || {})[id]; return a && a.day === nightId() ? a : null; }
 function aqaAt(r){ const a = aqaOf(r.id); return a && a.ret ? T(toMin(a.ret)) : null; }
 function unavailable(r){
   const c = currentWait(r);
@@ -1426,10 +1463,11 @@ function matchRide(pid, name, isShow){
   const n = norm(name), same = r => !!r.show === !!isShow;
   const ev = (pid === S.park && eventOn()) ? PARKS[pid].eventRides : [];
   return PARKS[pid].rides.concat(ev).find(r => same(r) && r.kw.some(k => n.includes(k)))
-      || (S.custom[pid] || []).find(c => same(c) && n && (n.includes(c.kw[0]) || c.kw[0].includes(n)));
+      || (S.custom[pid] || []).find(c => same(c) && n && c.kw && c.kw[0] && (n.includes(c.kw[0]) || c.kw[0].includes(n)));
 }
 async function fetchLive(pid){
   const p = PARKS[pid]; const out = {rides:{}, extras:[], at:Date.now()};
+  const sk0 = pid === S.park ? K() : pid;   // where wait samples are stored, fixed before any network wait
   let list = [], source = "ThemeParks.wiki", firstErr = null;
   for (let attempt = 0; attempt < 2 && !list.length; attempt++){
     try {
@@ -1451,7 +1489,7 @@ async function fetchLive(pid){
   }
   if (!list.length) throw new Error("ThemeParks.wiki didn't load: " + (firstErr ? firstErr.message : "no data"));
   if (!list.length) throw new Error("empty");
-  const h = Math.floor(nowT()/60), sk = K();
+  const h = Math.floor(nowT()/60), sk = sk0;
   samples[sk] = samples[sk] || {};
   out.source = source; out.raw = [];
   for (const x of list){
@@ -1480,11 +1518,15 @@ let liveFailed = false, liveError = "", liveRetry = null;
 async function refreshLive(){
   setStatus("Checking live waits…", false);
   clearTimeout(liveRetry);
+  const pid = S.park;
   try {
-    live[S.park] = await fetchLive(S.park); liveFailed = false; liveError = "";
-    const fe = (S.feedExtras = S.feedExtras || {})[S.park] = S.feedExtras[S.park] || {};
-    for (const x of live[S.park].extras) fe[x.id] = x;
-    const c = load("live", {}); c[S.park] = live[S.park]; save("live", c);
+    const got = await fetchLive(pid);
+    live[pid] = got; if (pid === S.park){ liveFailed = false; liveError = ""; }
+    const fe = (S.feedExtras = S.feedExtras || {})[pid] = S.feedExtras[pid] || {};
+    for (const x of got.extras) fe[x.id] = x;
+    const c = load("live", {}); c[pid] = got; save("live", c);
+    persist();
+    if (pid !== S.park){ renderStatus(); return; }        // you switched parks while this loaded
     if (eventOn()){   // on event nights, new houses from the feed start out ticked
       const seen = S.seen[K()] = S.seen[K()] || {}, sel = S.sel[K()] = S.sel[K()] || [];
       for (const x of live[S.park].extras) if (!seen[x.id]){ seen[x.id] = 1; if (!sel.includes(x.id)) sel.push(x.id); }
@@ -1525,9 +1567,14 @@ function simulate(order, t0, loc0, now, deadline){
   const items = order.filter(r => !isAnchor(r));
   const pending = [];
   for (const m of meals){
+    if (!m.r.meal && !aqaOf(m.r.id) && m.at < t0){   // that showing has started: aim for the next one if there is one
+      const nx = showTimes(m.r).find(x => x - SHOW_MIN_EARLY >= t0);
+      if (nx != null){ pending.push({r:m.r, at:nx, auto:true}); continue; }
+    }
     if (!aqaOf(m.r.id) && m.at + (m.r.meal ? m.r.dur : 0) < t0) steps.push({r:m.r, walk:0, arrive:m.at, hold:0, wait:0, showAt:m.at, end:m.at + m.r.dur, fits:false, passed:true});
     else pending.push(m);
   }
+  pending.sort((x, y) => x.at - y.at);
   const doMeal = m => {
     if (aqaOf(m.r.id)){   // queue pass: go back any time from the return time on, then a short merge wait
       const wk = walk(loc, m.r), arrive = t + wk, hold = Math.max(0, m.at - arrive), end = arrive + hold + AQA_WAIT + m.r.dur;
@@ -1655,21 +1702,23 @@ function planOrder(rides, t0, loc0, now, deadline, must, low){
    can't fit (say, it can't open before closing) it stays in your route marked "at risk", never dropped. */
 function protectMust(order, t0, loc, now, deadline, must, low){
   let o = order.slice();
-  const badMust = sim => sim.find(x => must[x.r.id] && !x.fits && !x.passed);
+  const gaveUp = new Set();   // must-dos that no move can save (they show as "at risk"); don't reshuffle for them
+  const badMust = sim => sim.find(x => must[x.r.id] && !x.fits && !x.passed && !gaveUp.has(x.r.id));
   for (let guard = 0; guard < 40; guard++){
     const sim = simulate(o, t0, loc, now, deadline), bad = badMust(sim);
     if (!bad) break;
     const at = o.indexOf(bad.r);
     const cands = o.slice(0, at).filter(r => !must[r.id] && !r.meal && pickedAt(r) == null);
-    if (!cands.length) break;
+    if (!cands.length){ gaveUp.add(bad.r.id); continue; }
     const fitsOf = x => x.filter(q => q.fits).length;
     let best = null;
     for (const c of cands){
       const trial = o.filter(r => r !== c).concat([c]), ts = simulate(trial, t0, loc, now, deadline);
-      const mineOk = ts.find(x => x.r === bad.r).fits;
-      const sc = (mineOk ? 1e6 : 0) + (low[c.id] ? 1e4 : 0) + fitsOf(ts) * 100 - (ts.find(x => x.r === bad.r).end) * 0.01;
-      if (!best || sc > best.sc) best = {o: trial, sc};
+      const mine = ts.find(x => x.r === bad.r), mineOk = mine.fits;
+      const sc = (mineOk ? 1e6 : 0) + (low[c.id] ? 1e4 : 0) + fitsOf(ts) * 100 - mine.end * 0.01;
+      if (!best || sc > best.sc) best = {o: trial, sc, mineOk, end: mine.end};
     }
+    if (!best.mineOk && !(best.end < bad.end - 1)){ gaveUp.add(bad.r.id); continue; }   // moving stops wouldn't help it
     o = best.o;
   }
   return o;
@@ -1682,6 +1731,11 @@ function savePlan(key, order, IL){
   S.plan = {key, order: ids, at: Date.now()}; persist();
 }
 function buildRoute(auto, reopt){
+  const clear = () => { planMemo.clear(); walkMemo.clear(); aqaMemo.clear(); opensMemo.clear(); };
+  Tcfg = null; FROZEN_NOW = T(nowMin()); clear();
+  try { return buildRouteInner(auto, reopt); } finally { FROZEN_NOW = null; Tcfg = null; clear(); }
+}
+function buildRouteInner(auto, reopt){
   const p = park(), now = nowT(), key = K();
   const sel = S.sel[key] || [], done = S.done[key] || {}, low = (S.low || {})[key] || {};
   const pool0 = allRides().filter(r => sel.includes(r.id) && !done[r.id]);
@@ -1694,8 +1748,9 @@ function buildRoute(auto, reopt){
   const rides = pool.filter(r => !unavailable(r));
   const st = startTime();
   let deadline = T(toMin(S.end[key] || hours().close));
-  if (deadline <= st.t) deadline += 24*60;
-  let closeT = T(toMin(hours().close)); if (closeT <= st.t) closeT += 24*60;
+  const openT = T(toMin(hours().open));
+  if (deadline <= openT) deadline += 24*60;            // a finish after midnight on a day schedule; a time already passed stays passed
+  let closeT = T(toMin(hours().close)); if (closeT <= openT) closeT += 24*60;
   LINE_BY = deadline >= closeT ? closeT - 1 : null;   // only when you're staying until closing
   const fromHere = !IL && st.t <= now + 1 && !!myPoint() && lastFix.acc <= 60;
   let loc = fromHere ? HERE : (S.loc[S.park] || p.lands[0]), t0 = st.t, ilStep = null;
@@ -1717,7 +1772,7 @@ function buildRoute(auto, reopt){
     const nextId = lockedIds.find(id => sel.includes(id) && !done[id]);
     const nextClosed = nextId && closed.find(r => r.id === nextId);
     if (nextClosed) alert = nextClosed.name + " is " + (unavailable(nextClosed) === "DOWN" ? "temporarily down" : "closed") + " right now, so it's set aside and your route carries on with the next stop. It slots back in if it reopens. Tap Replan if you'd like a fresh order.";
-    const sig = key + "|" + order.map(r => r.id).join(",") + "|" + Math.round(t0);
+    const sig = [key, order.map(r => r.id).join(","), Math.round(t0), Math.round(deadline), memoKey(loc), Object.keys(must).sort().join(","), Object.keys(low).filter(k => low[k]).sort().join(","), live[S.park] ? live[S.park].at : 0].join("|");
     if (order.length > 1 && betterCache.sig === sig && Date.now() - betterCache.at < 60000) better = betterCache.better;
     else if (order.length > 1){   // would a fresh plan be clearly better? (re-checked at most once a minute)
       const cur = simulate(order, t0, loc, now, deadline), alt = simulate(planOrder(rides, t0, loc, now, deadline, must, low), t0, loc, now, deadline);
@@ -1959,6 +2014,7 @@ function logDone(id){
     inLine: il && !il.showAt ? Math.round(nowT() - il.t) : null, showAt: il && il.showAt != null ? il.showAt : null,
     pass: !!aqaOf(id)});
 }
+let undoAsk = null;   // the Done item waiting for "Yes, undo"
 function renderDone(){
   const k = K(), L = ((S.doneLog || {})[k] || []).slice().sort((a, b) => b.at - a.at), done = S.done[k] || {};
   const logged = new Set(L.map(x => x.id));
@@ -1967,7 +2023,9 @@ function renderDone(){
   const what = x => x.kind === "meal" ? "Dinner" : x.kind === "show" ? (x.showAt != null ? fmtShort(x.showAt)+" show" : "Show") : x.kind === "zone" ? "Scare zone" : x.pass ? "Queue accommodation" : x.inLine != null ? "In line "+x.inLine+" min" : "Ride";
   const row = x => '<li class="step"><div class="when">'+(x.t == null ? '—' : fmtShort(x.t).replace(/([ap])$/,'<small>$1m</small>'))+'</div><div class="card"><h3>'+esc(x.name)+'</h3>'+
     '<div class="meta"><span>'+esc(x.land === "?" ? (x.kind === "meal" ? "Dining" : "") : x.land)+'</span><span class="pill">'+esc(what(x))+'</span></div>'+
-    '<div class="actions"><button type="button" data-undone="'+x.id+'">Undo</button></div></div></li>';
+    (undoAsk === x.id
+      ? '<div class="undoask"><span>Put <b>'+esc(x.name)+'</b> back on your list?</span><button type="button" class="chipbtn" data-undoyes="'+x.id+'">Yes, undo</button><button type="button" class="chipbtn lowbtn" data-undono="1">Keep</button></div>'
+      : '<button type="button" class="chipbtn lowbtn undobtn" data-undone="'+x.id+'">Undo</button>')+'</div></li>';
   $("doneBody").innerHTML =
     '<div class="summary"><div class="stat"><b>'+n+'</b><span>Done '+(eventOn() ? 'tonight' : 'today')+'</span></div>'+
     '<div class="stat"><b>'+lineMin+'m</b><span>In lines</span></div>'+
@@ -1978,8 +2036,11 @@ function renderDone(){
      : '<div class="empty">Nothing marked done yet. Tap <b>Done ✓</b> on a stop in My route and it shows up here.</div>');
 }
 $("doneBody").addEventListener("click", e => {
-  const b = e.target.closest("button[data-undone]"); if (!b) return;
-  const id = b.dataset.undone, k = K();
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.undone){ undoAsk = b.dataset.undone; renderDone(); return; }      // first tap: ask
+  if (b.dataset.undono){ undoAsk = null; renderDone(); return; }
+  if (!b.dataset.undoyes) return;
+  const id = b.dataset.undoyes, k = K(); undoAsk = null;
   if (S.done[k]) delete S.done[k][id];
   if (S.doneLog && S.doneLog[k]) S.doneLog[k] = S.doneLog[k].filter(x => x.id !== id);
   const sl = S.sel[k] = S.sel[k] || []; if (!sl.includes(id)) sl.push(id);
@@ -2107,7 +2168,9 @@ function notify(title, body){
   } catch(e){}
 }
 function checkShowAlerts(){
-  const P = lastPlan; if (!P) return;
+  // alerts need a current plan even if you stay on the Plan tab (or just reopened the app)
+  if ((!lastPlan || lastPlan.key !== K() || Date.now() - lastPlan.checkedAt > 5*60000) && (S.sel[K()] || []).length){ try { buildRoute(true); } catch(e){} }
+  const P = lastPlan; if (!P || P.key !== K()) return;
   const now = nowT(), day = nightId(), sent = load("alerts", {});
   if (sent.day !== day){ for (const k in sent) delete sent[k]; sent.day = day; }
   for (const s of P.steps){
@@ -2124,7 +2187,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) chec
 function addToCalendar(id, showAt, leave){
   const r = allRides().find(x => x.id === id); if (!r) return;
   const base = new Date(); base.setHours(0,0,0,0);
-  if (eventOn() && nowMin() < Math.max(300, toMin(hours().open) - 120)) base.setDate(base.getDate() - 1);   // after midnight: still "tonight"
+  if (nowT() >= 1440) base.setDate(base.getDate() - 1);   // it's already after midnight: the night started yesterday
   const at = m => new Date(base.getTime() + m*60000);
   const pad = n => String(n).padStart(2, "0"), stamp = d => d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+"T"+pad(d.getHours())+pad(d.getMinutes())+"00";
   const start = at(showAt), end = at(showAt + (r.dur || 20)), before = Math.max(0, Math.round(showAt - leave));
@@ -2410,7 +2473,11 @@ $("paceSeg").onclick = e => {
 $("crowdSeg").onclick = e => { const b = e.target.closest("button"); if (!b) return; S.crowd = Number(b.dataset.crowd); persist(); renderParkControls(); renderRides(); };
 $("selAll").onclick = () => { S.sel[K()] = allRides().map(r=>r.id); persist(); renderRides(); };
 $("selNone").onclick = () => { S.sel[K()] = []; persist(); renderRides(); };
-$("resetDay").onclick = () => { S.done[K()] = {}; persist(); renderRides(); };
+$("resetDay").onclick = () => {
+  const k = K(); S.done[k] = {}; if (S.doneLog) S.doneLog[k] = []; if (S.aqa) S.aqa[k] = {};
+  if (S.inLine && S.inLine.key === k) S.inLine = null; if (S.plan && S.plan.key === k) S.plan = null;
+  persist(); renderRides(); renderDone(); if (tab === "route") buildRoute();
+};
 $("rideList").addEventListener("change", e => {
   const tid = e.target.dataset.times;
   if (tid){ const list = parseTimes(e.target.value); ((S.showtimes = S.showtimes || {})[S.park] = S.showtimes[S.park] || {})[tid] = list; e.target.value = fmtTimes(list); persist(); renderRides(); return; }
@@ -2438,7 +2505,8 @@ $("rideList").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
   if (b.dataset.remove){
     S.custom[S.park] = (S.custom[S.park]||[]).filter(x => x.id !== b.dataset.remove);
-    S.sel[K()] = (S.sel[K()]||[]).filter(x => x !== b.dataset.remove); persist(); renderRides(); return;
+    for (const k in S.sel) S.sel[k] = (S.sel[k]||[]).filter(x => x !== b.dataset.remove);
+    persist(); renderMeals(); renderRides(); return;
   }
   if (b.dataset.aqa){
     const id = b.dataset.aqa, k = K(), A = (S.aqa = S.aqa || {})[k] = S.aqa[k] || {};
@@ -2447,7 +2515,7 @@ $("rideList").addEventListener("click", e => {
   }
   if (b.dataset.inlinenow){
     const id = b.dataset.inlinenow;
-    if (S.inLine && S.inLine.id === id && S.inLine.key === K()){ S.inLine = null; S.plan = null; persist(); renderRides(); return; }
+    if (S.inLine && S.inLine.id === id && S.inLine.key === K()){ S.inLine = null; persist(); renderRides(); return; }
     markInLine(id); renderRides(); setTab("route"); return;
   }
   if (b.dataset.must){ const m = S.must[K()] = S.must[K()]||{}; m[b.dataset.must] = !m[b.dataset.must]; if (m[b.dataset.must] && S.low && S.low[K()]) delete S.low[K()][b.dataset.must]; persist(); renderRides(); }
@@ -2548,9 +2616,15 @@ $("routeBody").addEventListener("click", e => {
 });
 $("routeBody").addEventListener("focusout", () => setTimeout(() => { if (routePending) buildRoute(); }, 50));
 $("checkUpdate").onclick = async () => {
-  $("checkUpdate").textContent = "Checking…";
-  try { const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration(); if (reg) await reg.update(); } catch(e){}
-  try { const k = await caches.keys(); await Promise.all(k.map(x => caches.delete(x))); } catch(e){}
+  const bt = $("checkUpdate");
+  if (!navigator.onLine){ bt.textContent = "No signal, try later"; return; }   // never reload into a blank page offline
+  bt.textContent = "Checking…";
+  try {
+    const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+    if (reg) await reg.update();
+    const r = await fetch("index.html", {cache:"no-store"});        // make sure the new copy is reachable first
+    if (!r.ok) throw 0;
+  } catch(e){ bt.textContent = "Couldn't reach the update, try later"; return; }
   location.reload();
 };
 document.addEventListener("change", e => {
@@ -2889,7 +2963,11 @@ function ridePoint(r){
   if (r.custom && r.pt) return r.pt;
   if (r.extra || r.custom){       // live-feed or hand-added items: try a name match too
     const g = graphFor(S.park);
-    if (g){ const n = norm(r.name), a = g.attractions.find(x => { const m = norm(x[0]); return m.includes(n) || n.includes(m); }); if (a) return [a[1], a[2]]; }
+    if (g){
+      const rc = g.rpCache || (g.rpCache = new Map()), ck = r.id + "|" + r.name;
+      if (!rc.has(ck)){ const n = norm(r.name), a = g.attractions.find(x => { const m = norm(x[0]); return m.includes(n) || n.includes(m); }); rc.set(ck, a ? [a[1], a[2]] : null); }
+      if (rc.get(ck)) return rc.get(ck);
+    }
   }
   return null;
 }
@@ -3035,7 +3113,12 @@ if (S.gps) startGPS();
 refreshLive();
 ensureOSM(S.park);
 setInterval(() => { if (!document.hidden) refreshLive(); }, 2*60000);
-document.addEventListener("visibilitychange", () => { if (!document.hidden && (liveFailed || !live[S.park] || Date.now()-live[S.park].at > 2*60000)) refreshLive(); });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  if (newNightCheck()){ persist(); renderAll(); if (tab === "done") renderDone(); }   // app left open overnight
+  if (liveFailed || !live[S.park] || Date.now()-live[S.park].at > 2*60000) refreshLive();
+});
+if ((S.sel[K()] || []).length && tab !== "route"){ try { buildRoute(true); } catch(e){} }   // so show alerts work right away
 })();
 </script>
 <script>if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}</script>
