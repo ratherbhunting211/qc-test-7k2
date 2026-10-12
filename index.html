@@ -159,7 +159,7 @@ select,input[type=time],input[type=number],input[type=text]{width:100%;backgroun
   background:linear-gradient(120deg,var(--g1),var(--g2));box-shadow:0 10px 26px var(--glow),0 4px 10px rgba(0,0,0,.18);display:flex;align-items:center;justify-content:center;gap:10px}
 :root.hhn .cta button{color:#fff}
 nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:5;background:color-mix(in srgb,var(--surface) 88%,transparent);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-top:1px solid var(--line);display:flex;justify-content:center;padding-bottom:env(safe-area-inset-bottom,0px)}
-nav.tabs div{display:grid;grid-template-columns:1fr 1fr;width:100%;max-width:560px}
+nav.tabs div{display:grid;grid-template-columns:1fr 1fr 1fr;width:100%;max-width:560px}
 nav.tabs button{border:0;background:none;padding:10px 0 12px;font-weight:700;font-size:.8rem;color:var(--muted);display:grid;justify-items:center;gap:3px}
 nav.tabs button[aria-pressed="true"]{color:var(--accent)}
 
@@ -955,7 +955,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
       <p class="hint" style="margin:0">Tick what you want. ★ marks a must-do, so the route never drops it. Tap a wait sign to type the posted wait from the official app.</p>
       <div id="liveNote"></div>
       <details class="addbox" id="feedBox"><summary>Check what the live feed lists</summary><div id="feedList"></div></details>
-      <p class="hint" id="verLine" style="margin:10px 0 0">App version 52 · <button type="button" class="chipbtn lowbtn" id="checkUpdate">Check for update</button></p>
+      <p class="hint" id="verLine" style="margin:10px 0 0">App version 53 · <button type="button" class="chipbtn lowbtn" id="checkUpdate">Check for update</button></p>
       <div id="rideList" style="display:grid;gap:12px"></div>
       <details class="addbox" id="mealBox"><summary>Dining reservations</summary>
         <div class="addform">
@@ -998,6 +998,9 @@ svg.leaflet-image-layer.leaflet-interactive path {
   <main id="routeView" hidden>
     <div id="routeBody"></div>
   </main>
+  <main id="doneView" hidden>
+    <div id="doneBody"></div>
+  </main>
 </div>
 
 <div class="toast" id="toast" role="alert" hidden></div>
@@ -1005,6 +1008,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 <nav class="tabs"><div>
   <button type="button" id="tabPlan" aria-pressed="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Plan</button>
   <button type="button" id="tabRoute" aria-pressed="false"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.5 18H15a3 3 0 000-6H9a3 3 0 010-6h6.5"/></svg>My route</button>
+  <button type="button" id="tabDone" aria-pressed="false"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Done</button>
 </div></nav>
 
 <script>
@@ -1170,7 +1174,7 @@ const S = Object.assign({
 /* One "night" runs 6 AM to 6 AM, so a pass or "in line" at 11:50 PM survives midnight on event nights. */
 function nightId(){ return new Date(Date.now() - 6*3600000).toDateString(); }
 // a new day/night: clear what you rode, the locked order, passes and picks from last time (not on first run)
-if (S.night && S.night !== nightId()){ S.done = {}; S.plan = null; S.inLine = null; S.aqa = {}; S.pick = {}; S.adj = {}; S.feedExtras = {}; }
+if (S.night && S.night !== nightId()){ S.done = {}; S.doneLog = {}; S.plan = null; S.inLine = null; S.aqa = {}; S.pick = {}; S.adj = {}; S.feedExtras = {}; }
 S.night = nightId();
 if (!S.showtimesV){   // lists saved by older versions could be missing times added since (e.g. Blood Noir's 8:00 PM)
   for (const pid in (S.showtimes || {})) for (const id in S.showtimes[pid]){
@@ -1190,7 +1194,7 @@ if (!S.evHours.usf){   // your Horror Nights ticket: 2 PM to 2 AM
   if (!S.end.usf_hhn || S.end.usf_hhn === "01:00") S.end.usf_hhn = "02:00";
 }
 function persist(){ save("state", {park:S.park,loc:S.loc,startMode:S.startMode,start:S.start,end:S.end,crowd:S.crowd,sel:S.sel,must:S.must,done:S.done,overrides:S.overrides,
-  event:S.event,plan:S.plan,low:S.low,inLine:S.inLine,evHours:S.evHours,opens:S.opens,showtimes:S.showtimes,showtimesV:S.showtimesV,pick:S.pick,adj:S.adj,aqa:S.aqa,night:S.night,feedExtras:S.feedExtras,custom:S.custom,pace:S.pace,mapMode:S.mapMode,extraLand:S.extraLand,calib:S.calib,seen:S.seen,gps:S.gps}); }
+  event:S.event,plan:S.plan,low:S.low,inLine:S.inLine,evHours:S.evHours,opens:S.opens,showtimes:S.showtimes,showtimesV:S.showtimesV,doneLog:S.doneLog,pick:S.pick,adj:S.adj,aqa:S.aqa,night:S.night,feedExtras:S.feedExtras,custom:S.custom,pace:S.pace,mapMode:S.mapMode,extraLand:S.extraLand,calib:S.calib,seen:S.seen,gps:S.gps}); }
 
 /* ---------- Helpers ---------- */
 const $ = id => document.getElementById(id);
@@ -1945,6 +1949,42 @@ function markInLine(id){
 const startPicker = () => { const cur = S.loc[S.park] || park().lands[0];
   return '<select class="area" id="routeLoc" aria-label="Where you are now" style="display:inline-block;width:auto;margin-left:4px;text-transform:none">'+allLands().map(l => '<option'+(l === cur ? ' selected' : '')+'>'+esc(l)+'</option>').join("")+'</select>'; };
 let routePending = false;
+/* ---------- Done tab: what you've done tonight ---------- */
+function logDone(id){
+  const r = allRides().find(x => x.id === id); if (!r) return;
+  const k = K(), L = (S.doneLog = S.doneLog || {})[k] = (S.doneLog[k] || []).filter(x => x.id !== id);
+  const il = S.inLine && S.inLine.id === id && S.inLine.key === k ? S.inLine : null;
+  L.push({id, name:r.name, land:r.land, at:Date.now(), t:nowT(),
+    kind: r.meal ? "meal" : r.show ? "show" : r.zone ? "zone" : "ride",
+    inLine: il && !il.showAt ? Math.round(nowT() - il.t) : null, showAt: il && il.showAt != null ? il.showAt : null,
+    pass: !!aqaOf(id)});
+}
+function renderDone(){
+  const k = K(), L = ((S.doneLog || {})[k] || []).slice().sort((a, b) => b.at - a.at), done = S.done[k] || {};
+  const logged = new Set(L.map(x => x.id));
+  const older = Object.keys(done).filter(id => done[id] && !logged.has(id)).map(id => allRides().find(r => r.id === id)).filter(Boolean);
+  const n = L.length + older.length, lineMin = L.reduce((a, x) => a + (x.inLine || 0), 0);
+  const what = x => x.kind === "meal" ? "Dinner" : x.kind === "show" ? (x.showAt != null ? fmtShort(x.showAt)+" show" : "Show") : x.kind === "zone" ? "Scare zone" : x.pass ? "Queue accommodation" : x.inLine != null ? "In line "+x.inLine+" min" : "Ride";
+  const row = x => '<li class="step"><div class="when">'+(x.t == null ? '—' : fmtShort(x.t).replace(/([ap])$/,'<small>$1m</small>'))+'</div><div class="card"><h3>'+esc(x.name)+'</h3>'+
+    '<div class="meta"><span>'+esc(x.land === "?" ? (x.kind === "meal" ? "Dining" : "") : x.land)+'</span><span class="pill">'+esc(what(x))+'</span></div>'+
+    '<div class="actions"><button type="button" data-undone="'+x.id+'">Undo</button></div></div></li>';
+  $("doneBody").innerHTML =
+    '<div class="summary"><div class="stat"><b>'+n+'</b><span>Done '+(eventOn() ? 'tonight' : 'today')+'</span></div>'+
+    '<div class="stat"><b>'+lineMin+'m</b><span>In lines</span></div>'+
+    '<div class="stat"><b>'+((S.sel[k] || []).filter(id => !done[id]).length)+'</b><span>Still to do</span></div></div>'+
+    (n ? '<section class="block"><span class="label">'+esc(park().name)+(eventOn() ? ' · Horror Nights' : '')+'</span><ol class="steps">'+L.map(row).join("")+'</ol>'+
+      (older.length ? '<span class="label">Earlier (time not recorded)</span><ol class="steps">'+older.map(r => row({id:r.id, name:r.name, land:r.land, t:null, kind:r.meal ? "meal" : r.show ? "show" : "ride"})).join("")+'</ol>' : '')+
+      '<p class="hint">Undo puts it back on your list and in your route.</p></section>'
+     : '<div class="empty">Nothing marked done yet. Tap <b>Done ✓</b> on a stop in My route and it shows up here.</div>');
+}
+$("doneBody").addEventListener("click", e => {
+  const b = e.target.closest("button[data-undone]"); if (!b) return;
+  const id = b.dataset.undone, k = K();
+  if (S.done[k]) delete S.done[k][id];
+  if (S.doneLog && S.doneLog[k]) S.doneLog[k] = S.doneLog[k].filter(x => x.id !== id);
+  const sl = S.sel[k] = S.sel[k] || []; if (!sl.includes(id)) sl.push(id);
+  persist(); renderRides(); renderDone();
+});
 function renderRoute(){
   const ae = document.activeElement;
   if (ae && /^(INPUT|SELECT)$/.test(ae.tagName) && $("routeBody").contains(ae)){ routePending = true; return; }
@@ -1971,7 +2011,7 @@ function renderRoute(){
   const verdict = riskNote + verdict0;
   const step = (s, i, isLate) => {
     const c = currentWait(s.r);
-    const src = c && c.wait!=null && Math.abs(s.arrive - nowT()) < 20 ? '<span class="pill live">'+(c.src==="you"?"posted":"live")+'</span>' : '<span class="pill">forecast</span>';
+    const src = c && c.wait!=null && Math.abs(s.arrive - nowT()) < 20 ? '<span class="pill live">'+(c.src==="you"?"posted":"live")+'</span>' : '<span class="pill">'+(c && c.wait != null ? 'forecast from live' : 'forecast')+'</span>';
     return '<li class="step'+(i===0&&!isLate?" next":"")+'"><div class="when">'+fmtShort(s.arrive).replace(/([ap])$/,'<small>$1m</small>')+'</div><div class="card">'+
       '<h3>'+esc(s.r.name)+'</h3>'+
       '<div class="meta"><span>'+esc(s.r.land==="?" ? (s.r.meal ? (s.r.extWalk != null ? "Outside the park" : "CityWalk") : "Location unknown") : s.r.land)+'</span>'+(must[s.r.id]?'<span class="pill must">Must-do</span>':'')+(lowR[s.r.id]?'<span class="pill">If time</span>':'')+src+'</div>'+
@@ -2283,7 +2323,9 @@ function refreshMap(){
 
 function setTab(t){
   tab = t;
-  $("planView").hidden = t !== "plan"; $("routeView").hidden = t !== "route";
+  $("planView").hidden = t !== "plan"; $("routeView").hidden = t !== "route"; $("doneView").hidden = t !== "done";
+  $("tabDone").setAttribute("aria-pressed", String(t==="done"));
+  if (t === "done") renderDone();
   $("cta").hidden = t !== "plan";
   $("tabPlan").setAttribute("aria-pressed", String(t==="plan")); $("tabRoute").setAttribute("aria-pressed", String(t==="route"));
   if (t === "route") buildRoute();
@@ -2496,8 +2538,9 @@ $("routeBody").addEventListener("click", e => {
   if (b.dataset.ics){ addToCalendar(b.dataset.ics, +b.dataset.at, +b.dataset.leave); return; }
   if (b.id === "alertsOn"){ enableAlerts(); return; }
   const id = b.dataset.done || b.dataset.skip; if (!id) return;
-  if (S.inLine && S.inLine.id === id) S.inLine = null;
   const r = allRides().find(x => x.id === id);
+  if (b.dataset.done) logDone(id);
+  if (S.inLine && S.inLine.id === id) S.inLine = null;
   if (S.aqa && S.aqa[K()]) delete S.aqa[K()][id];
   if (b.dataset.done){ const d = S.done[K()] = S.done[K()]||{}; d[id] = true; if (r && r.land !== "?") S.loc[S.park] = r.land; }
   else { S.sel[K()] = (S.sel[K()]||[]).filter(x => x !== id); }
@@ -2521,7 +2564,7 @@ document.addEventListener("click", e => {
   else if (d.retadj){ adjustReturn(d.retadj, Number(d.d)); refresh(); }
   else if (d.passfill){ const a = aqaOf(d.passfill); if (a){ a.fill = d.v === "1"; persist(); } refresh(); }
   else if (d.passoff){ if (S.aqa && S.aqa[K()]) delete S.aqa[K()][d.passoff]; persist(); refresh(); }
-  else if (d.passdone){ const id = d.passdone, dn = S.done[K()] = S.done[K()] || {}; dn[id] = true; if (S.aqa && S.aqa[K()]) delete S.aqa[K()][id];
+  else if (d.passdone){ logDone(d.passdone); const id = d.passdone, dn = S.done[K()] = S.done[K()] || {}; dn[id] = true; if (S.aqa && S.aqa[K()]) delete S.aqa[K()][id];
     const r = allRides().find(x => x.id === id); if (r && r.land !== "?") S.loc[S.park] = r.land; S.startMode = "now"; persist(); renderRides(); if (tab === "route") buildRoute(false, true); }
 });
 $("routeBody").addEventListener("change", e => {
@@ -2533,6 +2576,7 @@ $("routeBody").addEventListener("change", e => {
 $("buildBtn").onclick = () => { if (S.plan && S.plan.key === K()) S.plan = null; setTab("route"); };
 $("tabPlan").onclick = () => setTab("plan");
 $("tabRoute").onclick = () => setTab("route");
+$("tabDone").onclick = () => setTab("done");
 
 /* ---------- Real walkways (OpenStreetMap) ----------
    The installed app downloads the resort's footpaths and ride positions from OpenStreetMap once (free
