@@ -945,6 +945,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
           <button type="button" data-pace="auto">Auto</button>
         </div>
         <span class="hint" id="paceLine"></span>
+        <span class="hint" id="paceMeasured"></span>
       </div>
       <div class="field"><span class="hint">Walk less</span>
         <button type="button" class="chipbtn" id="walkLessPlan" aria-pressed="false" style="justify-self:start">Walk less</button>
@@ -961,7 +962,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
       <p class="hint" style="margin:0">Tick what you want. ★ marks a must-do, so the route never drops it. Tap a wait sign to type the posted wait from the official app.</p>
       <div id="liveNote"></div>
       <details class="addbox" id="feedBox"><summary>Check what the live feed lists</summary><div id="feedList"></div></details>
-      <p class="hint" id="verLine" style="margin:10px 0 0">App version 55 · <button type="button" class="chipbtn lowbtn" id="checkUpdate">Check for update</button></p>
+      <p class="hint" id="verLine" style="margin:10px 0 0">App version 56 · <button type="button" class="chipbtn lowbtn" id="checkUpdate">Check for update</button></p>
       <div id="rideList" style="display:grid;gap:12px"></div>
       <details class="addbox" id="mealBox"><summary>Dining reservations</summary>
         <div class="addform">
@@ -1891,6 +1892,20 @@ function renderMeals(){
   if (cur) sel.value = cur;
   $("mealExtWrap").hidden = sel.value !== "__out";
 }
+/* Your walking speed as measured by GPS (only real walking counts, not time in lines). Shown whatever the
+   pace setting; Auto is what makes the plan use it. Average adult park walking is about 2.6 mph (70 m/min). */
+const mph = mPerMin => mPerMin * 60 / 1609.34;
+function speedLine(){
+  const pc = S.pace || {};
+  if (pc.speed && pc.minutes >= 1){
+    const v = mph(pc.speed), avg = mph(70);
+    return '<b>Your walking speed: '+v.toFixed(1)+' mph</b> ('+Math.round(pc.speed)+' m/min), from '+Math.round(pc.minutes)+' min of walking. Average is about '+avg.toFixed(1)+' mph'+
+      (pc.mode !== "auto" ? '. Pick <b>Auto</b> above to plan with your speed.' : '.')+
+      ' <button type="button" class="chipbtn lowbtn" id="paceReset">Measure again</button>';
+  }
+  return geoId != null ? 'Measuring your walking speed: '+Math.round((pc.minutes || 0) * 10) / 10+' min of walking so far (needs about 1 min). Time in lines doesn\'t count.'
+    : 'To see your walking speed, turn on <b>Use my location</b>. The app measures it as you walk between stops.';
+}
 function renderPace(){
   const pc = S.pace || {};
   $("paceSeg").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.pace === (pc.mode || "normal"))));
@@ -1900,10 +1915,11 @@ function renderPace(){
   else if (pc.mode === "auto"){
     if (pc.minutes >= 3 && pc.speed){
       const pct = Math.round((paceFactor() - 1) * 100);
-      t = "Your measured pace is "+Math.round(pc.speed)+" m per minute over "+Math.round(pc.minutes)+" min of walking, so walks take "+(Math.abs(pct) < 5 ? "about the usual time." : "about "+Math.abs(pct)+"% "+(pct > 0 ? "longer" : "less")+" than average.");
-    } else t = geoId != null ? "Learning your pace as you walk. Needs about 3 minutes of walking ("+Math.round((pc.minutes||0)*10)/10+" so far)." : "Turn on Use my location and walk around. The app measures your real pace and uses it for every walk.";
+      t = "Walks use your measured speed, so they take "+(Math.abs(pct) < 5 ? "about the usual time." : "about "+Math.abs(pct)+"% "+(pct > 0 ? "longer" : "less")+" than average.");
+    } else t = "Walks use average speed until about 3 minutes of your walking has been measured.";
   }
   $("paceLine").textContent = t; $("paceLine").hidden = !t;
+  const ms = $("paceMeasured"); if (ms) ms.innerHTML = speedLine();
 }
 function renderHero(){
   const p = park(), h = hours();
@@ -2169,7 +2185,7 @@ function leaveAt(s){ return dueAt(s) - (s.walk || 0); }
 function paceRouteLine(){
   const pc = S.pace || {}, f = paceFactor(), pct = Math.round((f - 1) * 100);
   let t;
-  if (pc.mode === "auto") t = pc.minutes >= 3 && pc.speed ? 'Walk times use your measured pace: '+Math.round(pc.speed)+' m/min over '+Math.round(pc.minutes)+' min of walking ('+(Math.abs(pct) < 5 ? 'about average' : Math.abs(pct)+'% '+(pct > 0 ? 'slower' : 'faster')+' than average')+').' : 'Walk times use average pace until Auto has measured about 3 min of your walking ('+(Math.round((pc.minutes||0)*10)/10)+' so far).';
+  if (pc.mode === "auto") t = pc.minutes >= 3 && pc.speed ? 'Walk times use your measured speed: '+mph(pc.speed).toFixed(1)+' mph over '+Math.round(pc.minutes)+' min of walking ('+(Math.abs(pct) < 5 ? 'about average' : Math.abs(pct)+'% '+(pct > 0 ? 'slower' : 'faster')+' than average')+').' : 'Walk times use average pace until Auto has measured about 3 min of your walking ('+(Math.round((pc.minutes||0)*10)/10)+' so far).';
   else t = 'Walk times use the '+(pc.mode || 'normal')+' pace setting. Switch Walking pace to Auto to use your real speed.';
   return '<p class="hint" style="margin:0">'+t+'</p>';
 }
@@ -2677,6 +2693,7 @@ $("buildBtn").onclick = () => { if (S.plan && S.plan.key === K()) S.plan = null;
 $("tabPlan").onclick = () => setTab("plan");
 $("tabRoute").onclick = () => setTab("route");
 $("tabDone").onclick = () => setTab("done");
+$("paceMeasured").addEventListener("click", e => { if (e.target.id === "paceReset"){ S.pace = Object.assign({}, S.pace, {speed:0, minutes:0}); persist(); renderPace(); if (tab === "route") buildRoute(); } });
 $("walkLessPlan").onclick = () => { toggleWalkLess(); };
 
 /* ---------- Real walkways (OpenStreetMap) ----------
