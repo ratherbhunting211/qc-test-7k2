@@ -131,6 +131,9 @@ select,input[type=time],input[type=number],input[type=text]{width:100%;backgroun
 .rname .opens input{min-height:32px;padding:3px 8px;width:auto;font-size:.82rem;border-radius:9px}
 .rname .lowbtn{justify-self:start;margin-top:5px;padding:2px 10px;font-size:.74rem;color:var(--muted)}
 .retadj{display:flex;gap:6px;flex-wrap:wrap}
+.verfoot{text-align:center;margin:18px 0 calc(150px + env(safe-area-inset-bottom,0px))}
+.updbar{position:sticky;top:calc(env(safe-area-inset-top,0px) + 62px);z-index:6;display:flex;align-items:center;gap:10px;justify-content:space-between;margin:8px 0;padding:10px 12px;border-radius:14px;background:var(--accent);color:var(--accent-ink);font-weight:700;font-size:.9rem;box-shadow:var(--shadow)}
+.updbar button{border:0;border-radius:999px;padding:8px 14px;font-weight:800;background:var(--accent-ink);color:var(--accent);white-space:nowrap}
 .undobtn{margin-top:6px;justify-self:start}
 .undoask{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px;font-size:.88rem}
 .retbox{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px}
@@ -896,6 +899,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
     <div class="brand"><svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14.5" fill="#fff" fill-opacity=".16" stroke="#fff" stroke-opacity=".55" stroke-width="1.5"/><path d="M16 5.5l4.8 10.5L16 26.5l-4.8-10.5z" fill="var(--ticket)"/><path d="M16 16l4.8 0L16 26.5z" fill="#000" fill-opacity=".18"/><circle cx="16" cy="16" r="2.2" fill="#fff"/></svg>Queue Compass</div>
     <div class="status" id="status"><span class="dot" id="dot"></span><span id="statusText">Typical waits</span></div>
   </header>
+  <div class="updbar" id="updBar" hidden><span id="updText">A new version of the app is ready.</span><button type="button" id="updGo">Update now</button></div>
 
   <main id="planView">
     <div class="hero" id="hero"></div>
@@ -962,7 +966,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
       <p class="hint" style="margin:0">Tick what you want. ★ marks a must-do, so the route never drops it. Tap a wait sign to type the posted wait from the official app.</p>
       <div id="liveNote"></div>
       <details class="addbox" id="feedBox"><summary>Check what the live feed lists</summary><div id="feedList"></div></details>
-      <p class="hint" id="verLine" style="margin:10px 0 0">App version 56 · <button type="button" class="chipbtn lowbtn" id="checkUpdate">Check for update</button></p>
       <div id="rideList" style="display:grid;gap:12px"></div>
       <details class="addbox" id="mealBox"><summary>Dining reservations</summary>
         <div class="addform">
@@ -1008,6 +1011,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   <main id="doneView" hidden>
     <div id="doneBody"></div>
   </main>
+  <p class="hint verfoot" id="verLine">App version 57 · <button type="button" class="chipbtn lowbtn" id="checkUpdate">Check for update</button></p>
 </div>
 
 <div class="toast" id="toast" role="alert" hidden></div>
@@ -2657,8 +2661,34 @@ $("routeBody").addEventListener("click", e => {
   S.startMode = "now"; persist(); renderParkControls(); renderRides(); buildRoute(false, true);
 });
 $("routeBody").addEventListener("focusout", () => setTimeout(() => { if (routePending) buildRoute(); }, 50));
+/* Spotting updates: the app compares its own version with the one on GitHub when it opens, when you come
+   back to it and every 10 minutes, and shows a bar at the top of every screen when a newer one is ready. */
+const APP_VER = Number(($("verLine").textContent.match(/App version (\d+)/) || [0, 0])[1]);
+async function latestVersion(){
+  if (!navigator.onLine || !/^https?:$/.test(location.protocol)) return null;
+  try { const r = await fetch("index.html?check=" + Date.now(), {cache:"no-store"}); if (!r.ok) return null;
+        const m = (await r.text()).match(/App version (\d+)/); return m ? Number(m[1]) : null; } catch(e){ return null; }
+}
+async function lookForUpdate(){
+  const v = await latestVersion();
+  if (v && v > APP_VER){ $("updText").textContent = "Version " + v + " is ready (you have " + APP_VER + ")."; $("updBar").hidden = false; return true; }
+  return false;
+}
+async function applyUpdate(bt){
+  if (!navigator.onLine){ if (bt) bt.textContent = "No signal, try later"; return; }   // never reload into a blank page offline
+  if (bt) bt.textContent = "Updating…";
+  try { const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration(); if (reg) await reg.update(); } catch(e){}
+  location.reload();
+}
+$("updGo").onclick = () => applyUpdate($("updGo"));
+setTimeout(lookForUpdate, 4000);
+setInterval(() => { if (!document.hidden) lookForUpdate(); }, 10*60000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) lookForUpdate(); });
 $("checkUpdate").onclick = async () => {
   const bt = $("checkUpdate");
+  if (navigator.onLine){ bt.textContent = "Checking…"; const v = await latestVersion();
+    if (v && v > APP_VER) return applyUpdate(bt);
+    if (v === APP_VER){ bt.textContent = "You're up to date ✓"; setTimeout(() => { bt.textContent = "Check for update"; }, 4000); return; } }
   if (!navigator.onLine){ bt.textContent = "No signal, try later"; return; }   // never reload into a blank page offline
   bt.textContent = "Checking…";
   try {
