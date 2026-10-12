@@ -946,6 +946,10 @@ svg.leaflet-image-layer.leaflet-interactive path {
         </div>
         <span class="hint" id="paceLine"></span>
       </div>
+      <div class="field"><span class="hint">Walk less</span>
+        <button type="button" class="chipbtn" id="walkLessPlan" aria-pressed="false" style="justify-self:start">Walk less</button>
+        <span class="hint">Groups nearby stops and avoids crossing the park back and forth, even if you finish a little later. Turn it on or off any time; your route re-plans.</span>
+      </div>
       </div>
     </section>
 
@@ -957,7 +961,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
       <p class="hint" style="margin:0">Tick what you want. ★ marks a must-do, so the route never drops it. Tap a wait sign to type the posted wait from the official app.</p>
       <div id="liveNote"></div>
       <details class="addbox" id="feedBox"><summary>Check what the live feed lists</summary><div id="feedList"></div></details>
-      <p class="hint" id="verLine" style="margin:10px 0 0">App version 54 · <button type="button" class="chipbtn lowbtn" id="checkUpdate">Check for update</button></p>
+      <p class="hint" id="verLine" style="margin:10px 0 0">App version 55 · <button type="button" class="chipbtn lowbtn" id="checkUpdate">Check for update</button></p>
       <div id="rideList" style="display:grid;gap:12px"></div>
       <details class="addbox" id="mealBox"><summary>Dining reservations</summary>
         <div class="addform">
@@ -1199,7 +1203,7 @@ if (!S.evHours.usf){   // your Horror Nights ticket: 2 PM to 2 AM
   if (!S.end.usf_hhn || S.end.usf_hhn === "01:00") S.end.usf_hhn = "02:00";
 }
 function persist(){ save("state", {park:S.park,loc:S.loc,startMode:S.startMode,start:S.start,end:S.end,crowd:S.crowd,sel:S.sel,must:S.must,done:S.done,overrides:S.overrides,
-  event:S.event,plan:S.plan,low:S.low,inLine:S.inLine,evHours:S.evHours,opens:S.opens,showtimes:S.showtimes,showtimesV:S.showtimesV,doneLog:S.doneLog,pick:S.pick,adj:S.adj,aqa:S.aqa,night:S.night,feedExtras:S.feedExtras,custom:S.custom,pace:S.pace,mapMode:S.mapMode,extraLand:S.extraLand,calib:S.calib,seen:S.seen,gps:S.gps}); }
+  event:S.event,plan:S.plan,low:S.low,inLine:S.inLine,evHours:S.evHours,opens:S.opens,showtimes:S.showtimes,showtimesV:S.showtimesV,walkLess:S.walkLess,doneLog:S.doneLog,pick:S.pick,adj:S.adj,aqa:S.aqa,night:S.night,feedExtras:S.feedExtras,custom:S.custom,pace:S.pace,mapMode:S.mapMode,extraLand:S.extraLand,calib:S.calib,seen:S.seen,gps:S.gps}); }
 
 /* ---------- Helpers ---------- */
 const $ = id => document.getElementById(id);
@@ -1625,11 +1629,14 @@ function simulate(order, t0, loc0, now, deadline){
 }
 /* Fit the most (must-dos count most), finish earliest, and among equals do things sooner and
    spend less time standing around waiting for a show or opening. */
+/* "Walk less": every minute of walking counts like 2.5 minutes of finishing later, so the plan groups
+   nearby stops and avoids crossing the park back and forth. It never drops a stop just to save steps. */
+const WALK_LESS_W = 25, WALK_LESS_GREEDY = 2.5;
 function score(steps, must){
-  let s = 0, lastEnd = 0, sumEnds = 0, idle = 0;
-  for (const st of steps){ if (st.fits){ s += must[st.r.id] ? 1000 : 1; lastEnd = st.end; sumEnds += st.end; idle += st.hold || 0; } }
+  let s = 0, lastEnd = 0, sumEnds = 0, idle = 0, walked = 0;
+  for (const st of steps){ if (st.fits){ s += must[st.r.id] ? 1000 : 1; lastEnd = st.end; sumEnds += st.end; idle += st.hold || 0; walked += st.walk || 0; } }
   const total = steps.length ? steps[steps.length-1].end : 0;
-  return s*1e6 - lastEnd*10 - idle*2 - sumEnds*0.05 - total*0.01;
+  return s*1e6 - lastEnd*10 - idle*2 - sumEnds*0.05 - total*0.01 - (S.walkLess ? walked * WALK_LESS_W : 0);
 }
 function optimize(rides, t0, loc0, now, deadline, must){
   if (rides.length <= 1) return rides.slice();
@@ -1638,9 +1645,9 @@ function optimize(rides, t0, loc0, now, deadline, must){
     const left = rides.slice(), out = []; let t = t0, loc = loc0;
     while (left.length){
       const c = left.map(r => {
-        const wk = walk(loc, r), times = showTimes(r);
-        if (times.length){ const st = times.find(x => x - (r.early != null ? r.early : SHOW_EARLY) >= t + wk); return {r, cost: st == null ? 1e6 : (st - t) + r.dur - (must[r.id] ? 5 : 0)}; }
-        const op = opensAt(r), at = Math.max(t + wk, op || 0); return {r, cost: (at - t) + waitAt(r, at, now) + r.dur - (must[r.id] ? 5 : 0)}; })
+        const wk = walk(loc, r), times = showTimes(r), extra = S.walkLess ? wk * WALK_LESS_GREEDY : 0;
+        if (times.length){ const st = times.find(x => x - (r.early != null ? r.early : SHOW_EARLY) >= t + wk); return {r, cost: st == null ? 1e6 : (st - t) + r.dur - (must[r.id] ? 5 : 0) + extra}; }
+        const op = opensAt(r), at = Math.max(t + wk, op || 0); return {r, cost: (at - t) + waitAt(r, at, now) + r.dur - (must[r.id] ? 5 : 0) + extra}; })
                     .sort((a,b) => a.cost-b.cost);
       const pick = c[rand ? Math.floor(Math.random()*Math.min(3,c.length)) : 0];
       out.push(pick.r); left.splice(left.indexOf(pick.r),1);
@@ -1772,7 +1779,7 @@ function buildRouteInner(auto, reopt){
     const nextId = lockedIds.find(id => sel.includes(id) && !done[id]);
     const nextClosed = nextId && closed.find(r => r.id === nextId);
     if (nextClosed) alert = nextClosed.name + " is " + (unavailable(nextClosed) === "DOWN" ? "temporarily down" : "closed") + " right now, so it's set aside and your route carries on with the next stop. It slots back in if it reopens. Tap Replan if you'd like a fresh order.";
-    const sig = [key, order.map(r => r.id).join(","), Math.round(t0), Math.round(deadline), memoKey(loc), Object.keys(must).sort().join(","), Object.keys(low).filter(k => low[k]).sort().join(","), live[S.park] ? live[S.park].at : 0].join("|");
+    const sig = [S.walkLess ? "wl" : "", key, order.map(r => r.id).join(","), Math.round(t0), Math.round(deadline), memoKey(loc), Object.keys(must).sort().join(","), Object.keys(low).filter(k => low[k]).sort().join(","), live[S.park] ? live[S.park].at : 0].join("|");
     if (order.length > 1 && betterCache.sig === sig && Date.now() - betterCache.at < 60000) better = betterCache.better;
     else if (order.length > 1){   // would a fresh plan be clearly better? (re-checked at most once a minute)
       const cur = simulate(order, t0, loc, now, deadline), alt = simulate(planOrder(rides, t0, loc, now, deadline, must, low), t0, loc, now, deadline);
@@ -2046,6 +2053,23 @@ $("doneBody").addEventListener("click", e => {
   const sl = S.sel[k] = S.sel[k] || []; if (!sl.includes(id)) sl.push(id);
   persist(); renderRides(); renderDone();
 });
+let walkLessMsg = null;
+function planTotals(){
+  const f = lastPlan ? lastPlan.steps.filter(s => s.fits) : [];
+  return {walk: f.reduce((a, s) => a + (s.walk || 0), 0), end: f.length ? f[f.length-1].end : null, n: f.length};
+}
+/* Turning "walk less" on or off re-plans now (that's the point of the switch) and says what changed. */
+function toggleWalkLess(){
+  if (!lastPlan) buildRoute(true);
+  const before = planTotals();
+  S.walkLess = !S.walkLess; S.startMode = "now"; persist();
+  buildRoute(false, true);
+  const after = planTotals();
+  const fin = x => x == null ? "—" : fmt(x);
+  walkLessMsg = {at: Date.now(), text: (S.walkLess ? 'Walk less is on: ' : 'Walk less is off: ')+'walking '+Math.round(before.walk)+' → '+Math.round(after.walk)+' min, finish '+fin(before.end)+' → '+fin(after.end)+(after.n !== before.n ? ', '+after.n+' of your stops fit (was '+before.n+')' : '')+'.'};
+  renderRoute(); renderWalkLess();
+}
+function renderWalkLess(){ const b = $("walkLessPlan"); if (b){ b.setAttribute("aria-pressed", String(!!S.walkLess)); b.textContent = S.walkLess ? "✓ Walking less (on)" : "Walk less (off)"; } }
 function renderRoute(){
   const ae = document.activeElement;
   if (ae && /^(INPUT|SELECT)$/.test(ae.tagName) && $("routeBody").contains(ae)){ routePending = true; return; }
@@ -2120,7 +2144,8 @@ function renderRoute(){
     '<section class="block" style="padding-top:8px">'+verdict+
       (P.st.note ? '<p class="hint" style="margin:0">'+esc(P.st.note)+'</p>' : '')+
       (saved >= 10 ? '<p class="hint" style="margin:0">This order saves about <b>'+saved+' min</b> compared with riding them top to bottom.</p>' : '')+
-      '<div class="tools"><button class="chipbtn" type="button" id="replan">Replan from here, now</button></div>'+
+      '<div class="tools"><button class="chipbtn" type="button" id="replan">Replan from here, now</button><button class="chipbtn" type="button" id="walkLessBtn" aria-pressed="'+!!S.walkLess+'">'+(S.walkLess ? '✓ Walking less' : 'Walk less')+'</button></div>'+
+      (walkLessMsg && Date.now() - walkLessMsg.at < 10*60000 ? '<p class="hint" style="margin:0"><b>'+walkLessMsg.text+'</b></p>' : '')+
       '<p class="hint" style="margin:0">'+autoLine+'</p>'+paceRouteLine()+alertsLine()+
     '</section>'+
     (GEO[S.park] && fit.length ? mapSection() + dirLink + '</section>' : '')+
@@ -2132,6 +2157,7 @@ function renderRoute(){
     '<p class="hint">Tap <b>Done</b> after each ride. The app moves you to that spot and re-plans the rest from the current time and latest waits. Map areas are approximate.</p>';
   if ($("mapBox")) mountMap(P);
   const rp = $("replan"); if (rp) rp.onclick = () => { S.startMode = "now"; persist(); renderParkControls(); buildRoute(false, true); };
+  const wl = $("walkLessBtn"); if (wl) wl.onclick = () => toggleWalkLess();
   const rp2 = $("replan2"); if (rp2) rp2.onclick = () => { S.startMode = "now"; persist(); renderParkControls(); buildRoute(false, true); };
 }
 /* ---------- Show reminders ----------
@@ -2394,7 +2420,7 @@ function setTab(t){
   if (t === "route") buildRoute();
   window.scrollTo(0,0);
 }
-function renderAll(){ renderParkControls(); renderStatus(); renderRides(); if (tab==="route") buildRoute(); }
+function renderAll(){ renderWalkLess(); renderParkControls(); renderStatus(); renderRides(); if (tab==="route") buildRoute(); }
 
 /* ---------- Events ---------- */
 $("loc").onchange = e => {
@@ -2651,6 +2677,7 @@ $("buildBtn").onclick = () => { if (S.plan && S.plan.key === K()) S.plan = null;
 $("tabPlan").onclick = () => setTab("plan");
 $("tabRoute").onclick = () => setTab("route");
 $("tabDone").onclick = () => setTab("done");
+$("walkLessPlan").onclick = () => { toggleWalkLess(); };
 
 /* ---------- Real walkways (OpenStreetMap) ----------
    The installed app downloads the resort's footpaths and ride positions from OpenStreetMap once (free
